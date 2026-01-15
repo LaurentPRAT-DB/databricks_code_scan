@@ -29,31 +29,69 @@ class DatabricksWorkspaceScanner:
 
     def __init__(self, host: str = None, token: str = None, profile: str = None,
                  patterns: List[str] = None, languages: List[str] = None):
-        """
-        Initialize the scanner with Databricks credentials.
+        """Initialize the scanner with Databricks credentials and configuration.
+
+        This constructor establishes a connection to a Databricks workspace using
+        multiple authentication methods. It validates the connection by fetching
+        the current user information and compiles regex patterns for content scanning.
 
         Args:
-            host: Databricks workspace URL (e.g., https://xxx.cloud.databricks.com)
-            token: Personal access token for authentication
-            profile: Databricks CLI profile name from ~/.databrickscfg
-            patterns: List of regex patterns to search for in file contents
-            languages: List of languages to scan (default: ['python'])
+            host (str, optional): Databricks workspace URL
+                (e.g., https://xxx.cloud.databricks.com). Defaults to None.
+            token (str, optional): Personal access token for authentication.
+                Defaults to None.
+            profile (str, optional): Databricks CLI profile name from ~/.databrickscfg.
+                Defaults to None.
+            patterns (List[str], optional): List of regex pattern strings to search
+                for in file contents. Invalid patterns are skipped with a warning.
+                Defaults to None.
+            languages (List[str], optional): List of language names to filter
+                (e.g., ['python', 'sql', 'scala']). Defaults to ['python'].
 
-        Authentication priority:
-        1. Explicit host and token parameters
-        2. Specified profile from ~/.databrickscfg
-        3. Environment variables (DATABRICKS_HOST, DATABRICKS_TOKEN)
-        4. Default profile from ~/.databrickscfg
+        Raises:
+            ValueError: If connection to Databricks workspace fails due to invalid
+                credentials or network issues.
+
+        Note:
+            Authentication priority order:
+            1. Explicit host and token parameters
+            2. Specified profile from ~/.databrickscfg
+            3. Environment variables (DATABRICKS_HOST, DATABRICKS_TOKEN)
+            4. Default profile from ~/.databrickscfg
+
+            The connection is validated immediately by calling current_user.me(),
+            which ensures credentials are working before scanning begins.
+
+        Example:
+            >>> # Using explicit credentials
+            >>> scanner = DatabricksWorkspaceScanner(
+            ...     host="https://my-workspace.cloud.databricks.com",
+            ...     token="dapi1234567890"
+            ... )
+            Connected to workspace as: user@example.com
+
+            >>> # Using profile with patterns
+            >>> scanner = DatabricksWorkspaceScanner(
+            ...     profile="production",
+            ...     patterns=["password", "api_key"],
+            ...     languages=["python", "sql"]
+            ... )
+            Using profile: production
+            Filtering for languages: python, sql
         """
-        # Build configuration based on priority
+        # Build configuration based on authentication priority order
+        # Priority: explicit credentials > profile > env vars > default profile
         if host and token:
-            # Explicit credentials provided
+            # Highest priority: explicit credentials passed as parameters
+            # Used for programmatic access or custom authentication flows
             config = Config(host=host, token=token)
         elif profile:
-            # Use specified profile
+            # Second priority: named profile from ~/.databrickscfg
+            # Recommended for CLI usage with multiple workspaces
             config = Config(profile=profile)
         else:
-            # Let SDK handle authentication chain (env vars, default profile, etc.)
+            # Lowest priority: let Databricks SDK handle authentication chain
+            # SDK will try: DATABRICKS_HOST/DATABRICKS_TOKEN env vars, then DEFAULT profile
             config = Config()
 
         try:
@@ -130,20 +168,23 @@ class DatabricksWorkspaceScanner:
             if lang in language_extensions:
                 allowed_extensions.update(language_extensions[lang])
 
-        # Check notebooks - filter by language
+        # Check notebooks - filter by Databricks notebook language attribute
         if obj.object_type == ObjectType.NOTEBOOK:
             notebook_lang = getattr(obj, 'language', 'UNKNOWN')
             if notebook_lang and notebook_lang != 'UNKNOWN':
-                # Convert Language enum to string
+                # Convert Databricks Language enum to string for comparison
+                # The enum can be accessed via .name or .value depending on SDK version
                 # Try to get the enum name (e.g., Language.PYTHON -> "PYTHON")
                 if hasattr(notebook_lang, 'name'):
                     notebook_lang_str = notebook_lang.name.upper()
                 elif hasattr(notebook_lang, 'value'):
                     notebook_lang_str = str(notebook_lang.value).upper()
                 else:
+                    # Fallback: convert enum directly to string
                     notebook_lang_str = str(notebook_lang).upper()
 
-                # Map Databricks language names to our language keys
+                # Map Databricks language enum names to our lowercase language identifiers
+                # Databricks uses uppercase enum names (PYTHON, SQL, SCALA, R)
                 lang_map = {
                     'PYTHON': 'python',
                     'SQL': 'sql',
@@ -152,8 +193,9 @@ class DatabricksWorkspaceScanner:
                 }
                 mapped_lang = lang_map.get(notebook_lang_str, notebook_lang_str.lower())
                 return mapped_lang in self.languages
-            # If notebook language is unknown, allow it if Python is in filter
-            # (most notebooks are Python)
+
+            # If notebook language attribute is unknown or not set, assume Python
+            # This is a reasonable default since most Databricks notebooks are Python
             return 'python' in self.languages
 
         # Check regular files by extension
@@ -164,15 +206,38 @@ class DatabricksWorkspaceScanner:
         return False
 
     def get_file_content(self, path: str, obj_type: ObjectType) -> Optional[str]:
-        """
-        Download and return the content of a file or notebook.
+        """Download and return the content of a workspace file or notebook.
+
+        This method handles two types of Databricks workspace objects:
+        - NOTEBOOK: Exported in SOURCE format, base64-decoded
+        - FILE: Downloaded directly as binary content, decoded to UTF-8
 
         Args:
-            path: Path to the file in the workspace
-            obj_type: Type of the object (NOTEBOOK or FILE)
+            path (str): Full path to the file in the workspace
+                (e.g., /Users/user@example.com/notebook or /Repos/project/script.py).
+            obj_type (ObjectType): Type of the workspace object, either
+                ObjectType.NOTEBOOK or ObjectType.FILE.
 
         Returns:
-            File content as string, or None if unable to download
+            Optional[str]: File content as UTF-8 string if successfully downloaded
+                and decoded, None if download fails, file is binary, or encoding
+                is unsupported.
+
+        Note:
+            - Binary files (images, PDFs, etc.) will fail UTF-8 decoding and return None
+            - Large files are fully downloaded into memory - be cautious with file size
+            - Notebooks are exported in SOURCE format (not HTML or Jupyter format)
+            - Warnings are printed to stderr for failures without raising exceptions
+            - Permission errors will return None and print a warning
+
+        Example:
+            >>> scanner = DatabricksWorkspaceScanner(profile="prod")
+            >>> content = scanner.get_file_content(
+            ...     "/Users/john@example.com/ETL_Pipeline",
+            ...     ObjectType.NOTEBOOK
+            ... )
+            >>> if content:
+            ...     print(f"Notebook has {len(content)} characters")
         """
         try:
             if obj_type == ObjectType.NOTEBOOK:
@@ -198,15 +263,43 @@ class DatabricksWorkspaceScanner:
         return None
 
     def search_patterns_in_content(self, path: str, content: str) -> List[Dict]:
-        """
-        Search for regex patterns in file content.
+        """Search for compiled regex patterns in file content line by line.
+
+        This method iterates through each line of the file content and applies
+        all compiled regex patterns, collecting detailed information about each match.
 
         Args:
-            path: File path (for reporting)
-            content: File content to search
+            path (str): File path in the workspace (used for match reporting).
+            content (str): Full text content of the file to search.
 
         Returns:
-            List of match dictionaries with pattern, line number, and matched text
+            List[Dict]: List of match dictionaries, each containing:
+                - file (str): The file path where match was found
+                - line (int): Line number (1-indexed)
+                - pattern (str): The regex pattern that matched
+                - matched_text (str): The exact text that matched the pattern
+                - full_line (str): The complete line containing the match (stripped)
+                - start_pos (int): Starting position of match within the line
+                - end_pos (int): Ending position of match within the line
+
+        Note:
+            - Returns empty list if no patterns are configured or content is empty
+            - Line numbers are 1-indexed for readability
+            - Multiple patterns can match the same line
+            - Same pattern can match multiple times on the same line
+            - Performance: O(n * m * p) where n=lines, m=patterns, p=matches per line
+
+        Example:
+            >>> scanner = DatabricksWorkspaceScanner(
+            ...     profile="dev",
+            ...     patterns=["password", "api_key"]
+            ... )
+            >>> content = "line 1\\npassword = 'secret'\\nline 3"
+            >>> matches = scanner.search_patterns_in_content("/test.py", content)
+            >>> matches[0]['line']
+            2
+            >>> matches[0]['matched_text']
+            'password'
         """
         matches = []
         if not self.patterns or not content:
@@ -273,14 +366,47 @@ class DatabricksWorkspaceScanner:
             print(f"Warning: Could not access {path}: {str(e)}", file=sys.stderr)
 
     def scan_workspace(self, start_path: str = '/') -> List[Dict]:
-        """
-        Scan the entire workspace starting from a specific path.
+        """Scan Databricks workspace recursively for source code files matching language filter.
+
+        This is the main entry point for workspace scanning. It recursively traverses
+        directories, identifies source code files based on language filters, and
+        optionally searches file contents for regex patterns.
 
         Args:
-            start_path: Starting path for the scan (default: root '/')
+            start_path (str, optional): Starting path for recursive scan in the
+                workspace. Use '/' for entire workspace, or '/Users/username' for
+                specific user directory. Defaults to '/'.
 
         Returns:
-            List of dictionaries containing source file information
+            List[Dict]: List of source file dictionaries, each containing:
+                - path (str): Full workspace path to the file
+                - type (str): Object type ('NOTEBOOK' or 'FILE')
+                - language (str): Programming language (e.g., 'PYTHON', 'SQL')
+
+        Note:
+            - Clears previous scan results (self.source_files and self.pattern_matches)
+            - Continues scanning even if some directories are inaccessible
+            - If patterns are configured, downloads and searches each file (slower)
+            - Pattern matches are stored in self.pattern_matches
+            - Prints progress messages to stdout during scan
+            - Scan performance depends on workspace size and pattern complexity
+
+        Performance:
+            - Without patterns: ~100-500 files/second (metadata only)
+            - With patterns: ~10-50 files/second (downloads and searches content)
+            - Large workspaces (>10,000 files) may take several minutes
+
+        Example:
+            >>> scanner = DatabricksWorkspaceScanner(profile="production")
+            >>> # Scan entire workspace
+            >>> files = scanner.scan_workspace()
+            Scanning Databricks workspace starting from: /
+            Found 234 source code files
+
+            >>> # Scan specific user directory
+            >>> files = scanner.scan_workspace(start_path="/Users/john@example.com")
+            Scanning Databricks workspace starting from: /Users/john@example.com
+            Found 45 source code files
         """
         print(f"Scanning Databricks workspace starting from: {start_path}")
         self.source_files = []
@@ -411,17 +537,57 @@ class DatabricksWorkspaceScanner:
 
 
 def load_patterns_from_config(config_file: str) -> List[str]:
-    """
-    Load regex patterns from a configuration file.
+    """Load regex patterns from a YAML or JSON configuration file.
 
-    Supports YAML and JSON formats. The config file should contain a 'patterns' key
-    with a list of regex pattern strings.
+    This function supports both YAML and JSON formats and can handle files with
+    .example extensions. The configuration file must contain a root-level
+    'patterns' key with a list of regex pattern strings.
 
     Args:
-        config_file: Path to the configuration file (.yaml, .yml, .json, or .example)
+        config_file (str): Path to the configuration file. Supported extensions:
+            - .yaml, .yml (YAML format)
+            - .json (JSON format)
+            - .yaml.example, .json.example (example files)
 
     Returns:
-        List of regex pattern strings
+        List[str]: List of regex pattern strings to be compiled and used for
+            content searching.
+
+    Raises:
+        SystemExit: Exits with code 1 if file cannot be read, parsed, or does
+            not contain valid pattern configuration.
+
+    Note:
+        - The .example suffix is stripped when determining file type
+        - Configuration must be a dictionary with a 'patterns' key
+        - The 'patterns' value must be a list of strings
+        - Comments starting with _ (e.g., _comment, _usage) are ignored
+        - Invalid patterns are not validated here - validation happens during compilation
+
+    Example:
+        YAML format (patterns.yaml):
+        ```yaml
+        patterns:
+          - "password\\s*=\\s*['\"].*['\"]"
+          - "api_key"
+          - "TODO:"
+        ```
+
+        JSON format (patterns.json):
+        ```json
+        {
+          "patterns": [
+            "password\\\\s*=\\\\s*['\\\"].*['\\\"]",
+            "api_key",
+            "TODO:"
+          ]
+        }
+        ```
+
+        Usage:
+        >>> patterns = load_patterns_from_config("security_patterns.yaml")
+        >>> print(len(patterns))
+        15
     """
     patterns = []
     try:

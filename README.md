@@ -1,75 +1,196 @@
-# Databricks Workspace Source Code Scanner
+# Databricks Workspace Security Scanner
 
-A Python script to scan a Databricks workspace and list all files containing source code, including notebooks and regular source files.
+A Python-based security and compliance scanner for Databricks workspaces. Recursively scans workspace directories to identify source code files and detect security patterns, code quality issues, and compliance violations using configurable regex patterns.
 
-**By default, only Python executable code is scanned** (`.py` files and Python notebooks). This ensures you're only analyzing actual code, not configuration files, documentation, or other non-executable files. You can specify additional languages with the `--language` flag.
+## Business Purpose
 
-## Features
+This tool addresses critical security and compliance needs for Databricks environments:
 
-- Recursively scans Databricks workspace directories
-- **Language Filtering**: Scans only executable code files (default: Python only)
-- Identifies notebooks (.py, .sql, .scala, .r) filtered by language
-- Detects regular source files (.py, .sql, .java, .js, etc.) filtered by language
-- **Pattern Matching**: Search for regex patterns within file contents
-- Supports configuration files (YAML/JSON) for pattern definitions
-- Multiple authentication methods (profiles, env vars, direct credentials)
-- Groups results by file type
-- Exports results with pattern matches to text files
-- Detailed match reporting with line numbers and context
+- **Security Auditing**: Detect hardcoded credentials, API keys, and sensitive data exposure
+- **Code Quality**: Find TODO comments, deprecated APIs, and code smells across large workspaces
+- **Compliance Scanning**: Identify code patterns that violate organizational policies or regulations
+- **Workspace Inventory**: Maintain an accurate inventory of all source code assets
+- **Migration Planning**: Detect deprecated DBFS patterns and local file writes that need refactoring
+
+**Target Use Cases:**
+- Security teams conducting workspace audits
+- DevOps teams enforcing coding standards
+- Data governance teams ensuring compliance
+- Platform teams managing large multi-tenant Databricks environments
+- Engineers migrating to Unity Catalog best practices
+
+## Key Features
+
+### Security & Compliance
+- **Pattern Matching Engine**: Regex-based content scanning for security patterns
+- **Multi-language Support**: Scan Python, SQL, Scala, R, Java, JavaScript, and 10+ other languages
+- **Configuration-driven**: Define security patterns in YAML/JSON for reusability
+- **Detailed Reporting**: Line-by-line matches with context and pattern information
+
+### Workspace Analysis
+- **Recursive Scanning**: Deep traversal of workspace directory structures
+- **Language Filtering**: Target specific languages to reduce noise (default: Python only)
+- **Object Type Detection**: Distinguishes notebooks from regular files
+- **Flexible Authentication**: Supports profiles, environment variables, and direct credentials
+
+### Reporting & Output
+- **Grouped Results**: Organize findings by file type or workspace path
+- **Export to File**: Save results for audit trails and compliance documentation
+- **Progress Tracking**: Real-time feedback during large workspace scans
+- **Match Context**: View full lines with match highlighting for quick triage
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                  Databricks Workspace Scanner                │
+└─────────────────────────────────────────────────────────────┘
+                             │
+                ┌────────────┴────────────┐
+                │                         │
+         ┌──────▼──────┐         ┌───────▼────────┐
+         │ Scanner Core│         │Authentication  │
+         └──────┬──────┘         │   Manager      │
+                │                └────────────────┘
+    ┌───────────┼───────────┐
+    │           │           │
+┌───▼────┐ ┌───▼────┐ ┌───▼─────┐
+│Language│ │Pattern │ │ Content │
+│Filter  │ │Matcher │ │Downloader│
+└───┬────┘ └───┬────┘ └───┬─────┘
+    │          │          │
+    └──────────┼──────────┘
+               │
+       ┌───────▼────────┐
+       │ Report Generator│
+       └────────────────┘
+               │
+    ┌──────────┴──────────┐
+    │                     │
+┌───▼────┐         ┌─────▼─────┐
+│Console │         │File Export│
+│Output  │         │           │
+└────────┘         └───────────┘
+```
+
+### Components
+
+1. **Scanner Core** (`DatabricksWorkspaceScanner`): Main orchestration class
+2. **Authentication Manager**: Handles Databricks SDK authentication with priority chain
+3. **Language Filter**: Filters files by programming language and extension
+4. **Pattern Matcher**: Compiles and applies regex patterns to file content
+5. **Content Downloader**: Retrieves notebook and file content via Databricks API
+6. **Report Generator**: Formats and displays scan results
+
+### Data Flow
+
+1. **Authentication**: Establish connection to Databricks workspace
+2. **Configuration**: Load patterns from config files and CLI arguments
+3. **Directory Traversal**: Recursively scan workspace starting from specified path
+4. **Language Filtering**: Apply language filters to identify target files
+5. **Content Download**: Fetch file content for pattern matching (if patterns specified)
+6. **Pattern Matching**: Apply compiled regex patterns line-by-line
+7. **Result Aggregation**: Collect matches with file path, line number, and context
+8. **Reporting**: Display or export results in requested format
+
+## Prerequisites
+
+### Required Software
+
+- **Python**: 3.8 or higher
+- **uv**: Fast Python package manager (recommended) or pip
+- **Databricks Workspace**: Access to a Databricks workspace with valid credentials
+
+### Required Permissions
+
+- **Databricks Workspace Access**: Ability to read workspace objects
+- **Token or Profile**: Personal access token or configured CLI profile
+- **Read Permissions**: Access to directories and files you want to scan
+
+### Network Requirements
+
+- **HTTPS Access**: Outbound HTTPS connection to Databricks workspace
+- **Firewall Rules**: No blocking of Databricks API endpoints
 
 ## Installation
 
-This project uses [uv](https://github.com/astral-sh/uv) for fast Python package management.
+### Option 1: Using uv (Recommended)
 
-### Install uv
-
-If you don't have uv installed:
+[uv](https://github.com/astral-sh/uv) is a fast Python package manager with automatic dependency management.
 
 ```bash
+# Install uv (if not already installed)
 curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# No additional setup needed!
+# The scripts use inline dependency metadata (PEP 723)
+# uv run will automatically install dependencies on first run
 ```
 
-### Running the Scripts
+**Benefits of uv:**
+- ⚡ **Fast**: 10-100x faster than pip
+- 🔒 **Isolated**: Each script runs in its own environment
+- 📦 **Automatic**: No manual dependency installation
+- 🔄 **Cached**: Dependencies cached for fast subsequent runs
 
-No additional setup needed! The scripts use inline dependency metadata (PEP 723), so `uv run` will automatically:
-- Install required dependencies in an isolated environment
-- Run the script with the correct Python version
-- Cache dependencies for faster subsequent runs
-
-Simply run:
+### Option 2: Using pip
 
 ```bash
-uv run scan_databricks_workspace.py --profile production
+# Clone the repository
+git clone https://github.com/LaurentPRAT-DB/databricks_code_scan.git
+cd databricks_code_scan
+
+# Create virtual environment (recommended)
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+# Or manually:
+pip install databricks-sdk>=0.20.0 pyyaml>=6.0
 ```
 
-The first run will install dependencies, and subsequent runs will be much faster.
+### Verify Installation
+
+```bash
+# Using uv
+uv run scan_databricks_workspace.py --help
+
+# Using pip (in activated venv)
+python scan_databricks_workspace.py --help
+```
 
 ## Configuration
 
-The script supports multiple authentication methods with the following priority order:
+### Authentication Methods
 
-1. **Command-line credentials** (--host and --token)
-2. **Profile from Databricks CLI** (--profile)
-3. **Environment variables** (DATABRICKS_HOST, DATABRICKS_TOKEN)
-4. **Default profile** from ~/.databrickscfg
+The scanner supports multiple authentication methods with the following priority order:
 
-### Option 1: Databricks CLI Profile (Recommended)
+1. **Command-line credentials** (`--host` and `--token` flags)
+2. **Profile from Databricks CLI** (`--profile` flag)
+3. **Environment variables** (`DATABRICKS_HOST`, `DATABRICKS_TOKEN`)
+4. **Default profile** from `~/.databrickscfg`
 
-If you have the Databricks CLI configured, you can use profiles:
+### Setting Up Authentication
+
+#### Method 1: Databricks CLI Profiles (Recommended)
+
+Profiles provide secure, reusable authentication for multiple workspaces.
 
 ```bash
-# Configure a profile (one-time setup)
+# Install Databricks CLI (if not installed)
+pip install databricks-cli
+
+# Configure profiles for different workspaces
 databricks configure --profile production
 databricks configure --profile dev
+databricks configure --profile staging
 
 # List available profiles
 uv run list_profiles.py
-
-# Use the profile
-uv run scan_databricks_workspace.py --profile production
 ```
 
-Your profiles are stored in `~/.databrickscfg`:
+**Profile Configuration File** (`~/.databrickscfg`):
 ```ini
 [DEFAULT]
 host = https://workspace1.cloud.databricks.com
@@ -84,14 +205,23 @@ host = https://dev.cloud.databricks.com
 token = dapi...
 ```
 
-### Option 2: Environment Variables
+#### Method 2: Environment Variables
 
 ```bash
+# Linux/Mac
 export DATABRICKS_HOST="https://your-workspace.cloud.databricks.com"
 export DATABRICKS_TOKEN="your-personal-access-token"
+
+# Windows (PowerShell)
+$env:DATABRICKS_HOST="https://your-workspace.cloud.databricks.com"
+$env:DATABRICKS_TOKEN="your-personal-access-token"
+
+# Windows (Command Prompt)
+set DATABRICKS_HOST=https://your-workspace.cloud.databricks.com
+set DATABRICKS_TOKEN=your-personal-access-token
 ```
 
-### Option 3: Command-Line Arguments
+#### Method 3: Command-Line Arguments
 
 ```bash
 uv run scan_databricks_workspace.py \
@@ -99,144 +229,284 @@ uv run scan_databricks_workspace.py \
   --token "your-token"
 ```
 
-## Getting a Personal Access Token
+### Generating Personal Access Tokens
 
 1. Log in to your Databricks workspace
-2. Click on your username in the top right corner
-3. Select "User Settings"
-4. Go to "Developer" > "Access tokens"
-5. Click "Generate new token"
-6. Copy the token (you won't be able to see it again)
+2. Click your username in the top-right corner
+3. Select **User Settings**
+4. Navigate to **Developer** → **Access tokens**
+5. Click **Generate new token**
+6. Set description and lifetime (recommend short-lived tokens for scanning)
+7. Copy the token immediately (cannot be retrieved later)
 
-## Language Filtering
+**Security Best Practices:**
+- Use short-lived tokens (e.g., 7-30 days) for scanning operations
+- Store tokens in secure credential managers (not in code)
+- Use service principals for automated scanning
+- Rotate tokens regularly
+- Never commit tokens to version control
 
-By default, the scanner **only scans Python files** (both `.py` files and Python notebooks). This ensures you're only scanning executable code and not configuration files, documentation, or other non-code files.
+## Usage
 
-### Supported Languages
+### Command-Line Interface
 
-The scanner supports filtering by the following languages:
+```
+usage: scan_databricks_workspace.py [-h] [--profile PROFILE] [--host HOST]
+                                     [--token TOKEN] [--path PATH]
+                                     [--output OUTPUT] [--group-by-type]
+                                     [--language LANGUAGE] [--pattern PATTERN]
+                                     [--config CONFIG]
 
-- `python` - Python files (.py) and notebooks
-- `sql` - SQL files and notebooks
-- `scala` - Scala files and notebooks
-- `r` - R files and notebooks
-- `java` - Java files (.java)
-- `javascript` - JavaScript files (.js)
-- `typescript` - TypeScript files (.ts)
-- `shell` - Shell scripts (.sh, .bash)
-- `go` - Go files (.go)
-- `rust` - Rust files (.rs)
-- `c` - C files (.c, .h)
-- `cpp` - C++ files (.cpp, .hpp, .cc, .cxx)
-- `csharp` - C# files (.cs)
-- `ruby` - Ruby files (.rb)
-- `perl` - Perl files (.pl, .pm)
-- `php` - PHP files (.php)
+Scan Databricks workspace for source code files and search for patterns
 
-### Specifying Languages
+Authentication (in priority order):
+  --profile/-p PROFILE      Profile name from ~/.databrickscfg
+  --host HOST              Workspace URL
+  --token TOKEN            Personal access token
+  (or use environment variables: DATABRICKS_HOST, DATABRICKS_TOKEN)
 
-```bash
-# Default: Python only
-uv run scan_databricks_workspace.py -p production
+Scan Options:
+  --path PATH              Starting path to scan (default: /)
+  --output/-o FILE         Export results to file
+  --group-by-type/-g       Group files by type in output
 
-# Scan Python and SQL
-uv run scan_databricks_workspace.py -p production --language python --language sql
+Language Filtering:
+  --language/-l LANG       Language to scan (default: python)
+                          Can be specified multiple times
+                          Use "all" to scan all supported languages
 
-# Short form
-uv run scan_databricks_workspace.py -p production -l python -l sql
-
-# Scan all supported languages
-uv run scan_databricks_workspace.py -p production --language all
+Pattern Matching:
+  --pattern REGEX          Regex pattern to search (can repeat)
+  --config/-c FILE         Config file with patterns (YAML/JSON)
 ```
 
-### Why Language Filtering?
+### Basic Examples
 
-Language filtering ensures you:
-- **Only scan executable code** (no .json, .yaml, .md, .txt files)
-- **Reduce false positives** when searching for patterns
-- **Speed up scans** by skipping non-code files
-- **Focus on relevant files** for your use case
-
-For example, searching for "password" in a `.md` documentation file is different from finding it in a `.py` source file.
-
-## Pattern Searching
-
-The scanner can search for regex patterns within your source code files. This is useful for:
-- Finding security issues (hardcoded credentials, API keys)
-- Locating code quality markers (TODO, FIXME, HACK)
-- Identifying deprecated APIs or patterns
-- Compliance scanning
-- Code smell detection
-
-### Pattern Sources
-
-Patterns can be provided in two ways:
-
-#### 1. Command-Line Arguments
-
-Use `--pattern` to specify patterns directly:
+#### 1. Simple Workspace Scan (Python Only)
 
 ```bash
-# Single pattern
-uv run scan_databricks_workspace.py -p production --pattern "password.*="
+# Using profile
+uv run scan_databricks_workspace.py --profile production
+
+# Short form
+uv run scan_databricks_workspace.py -p production
+```
+
+**Output:**
+```
+Connected to workspace as: user@example.com
+Workspace URL: https://production.cloud.databricks.com
+Using profile: production
+Filtering for languages: python
+Scanning Databricks workspace starting from: /
+Found 234 source code files
+
+Source Code Files:
+--------------------------------------------------------------------------------
+/Users/john.doe/ETL_Pipeline
+/Users/john.doe/Data_Analysis
+/Repos/data-platform/src/utils.py
+...
+```
+
+#### 2. Scan Specific User Directory
+
+```bash
+uv run scan_databricks_workspace.py \
+  --profile dev \
+  --path /Users/john.doe
+```
+
+#### 3. Scan Multiple Languages
+
+```bash
+# Python and SQL
+uv run scan_databricks_workspace.py -p production -l python -l sql
+
+# All supported languages
+uv run scan_databricks_workspace.py -p production -l all
+```
+
+#### 4. Group Results by Type
+
+```bash
+uv run scan_databricks_workspace.py -p production --group-by-type
+```
+
+**Output:**
+```
+NOTEBOOK (145 files):
+--------------------------------------------------------------------------------
+  /Users/john.doe/ETL_Pipeline [PYTHON]
+  /Users/jane.smith/Analytics [SQL]
+  /Shared/ML_Models/Training [SCALA]
+
+FILE (89 files):
+--------------------------------------------------------------------------------
+  /Repos/data-platform/src/utils.py
+  /Repos/data-platform/src/config.py
+```
+
+#### 5. Export Results to File
+
+```bash
+uv run scan_databricks_workspace.py -p production -o workspace_scan.txt
+```
+
+### Pattern Matching Examples
+
+#### Inline Pattern Search
+
+```bash
+# Search for TODO comments
+uv run scan_databricks_workspace.py -p dev --pattern "TODO:"
 
 # Multiple patterns
 uv run scan_databricks_workspace.py -p dev \
-  --pattern "TODO:" \
-  --pattern "FIXME:" \
-  --pattern "password\\s*=\\s*['\"].*['\"]"
+  --pattern "password\s*=\s*['\"].*['\"]" \
+  --pattern "api[_-]?key" \
+  --pattern "secret"
 ```
 
-#### 2. Configuration Files
+#### Configuration File Pattern Search
 
-Create a YAML or JSON configuration file with your patterns:
-
-**patterns.yaml:**
+**Create pattern configuration** (`security_patterns.yaml`):
 ```yaml
 patterns:
+  # Hardcoded credentials
   - "password\\s*=\\s*['\"].*['\"]"
   - "api[_-]?key\\s*=\\s*['\"].*['\"]"
   - "secret\\s*=\\s*['\"].*['\"]"
+  - "token\\s*=\\s*['\"].*['\"]"
+
+  # Database connections
+  - "jdbc:[^\\s]+"
+  - "mongodb://[^\\s]+"
+
+  # AWS credentials
+  - "AKIA[0-9A-Z]{16}"
+  - "aws_access_key_id"
+  - "aws_secret_access_key"
+
+  # Code quality
   - "TODO:"
   - "FIXME:"
+  - "HACK:"
 ```
 
-**patterns.json:**
-```json
-{
-  "patterns": [
-    "password\\s*=\\s*['\"].*['\"]",
-    "TODO:",
-    "FIXME:"
-  ]
-}
+**Run with configuration:**
+```bash
+uv run scan_databricks_workspace.py \
+  --profile production \
+  --config security_patterns.yaml \
+  --output security_scan.txt
 ```
 
-Use the config file:
+**Pattern Match Output:**
+```
+Pattern Matches (8 total):
+================================================================================
+
+/Users/john.doe/ETL_Pipeline (3 matches):
+--------------------------------------------------------------------------------
+  Line 15: password = "hardcoded_password_here"
+    Pattern: password\s*=\s*['"].*['"]
+    Matched: 'password = "hardcoded_password_here"'
+
+  Line 42: # TODO: Refactor this function
+    Pattern: TODO:
+    Matched: 'TODO:'
+
+  Line 78: api_key = "sk-1234567890abcdef"
+    Pattern: api[_-]?key\s*=\s*['"].*['"]
+    Matched: 'api_key = "sk-1234567890abcdef"'
+```
+
+### Advanced Usage Scenarios
+
+#### Scenario 1: Security Audit
+
+Scan Python and SQL code for security issues:
 
 ```bash
-uv run scan_databricks_workspace.py -p production --config patterns.yaml
+uv run scan_databricks_workspace.py \
+  --profile production \
+  --language python \
+  --language sql \
+  --config security_patterns.yaml \
+  --group-by-type \
+  --output security_audit_$(date +%Y%m%d).txt
 ```
 
-### Example Configuration Files
+#### Scenario 2: Code Quality Review
 
-The repository includes example configuration files:
-
-- `patterns.yaml.example` - General purpose patterns
-- `patterns.json.example` - JSON format example
-- `security_patterns.yaml.example` - Security-focused patterns
-
-Copy and customize them:
+Find code quality markers across entire workspace:
 
 ```bash
-cp patterns.yaml.example patterns.yaml
-# Edit patterns.yaml with your patterns
-uv run scan_databricks_workspace.py -p production --config patterns.yaml
+uv run scan_databricks_workspace.py \
+  --profile dev \
+  --language all \
+  --pattern "TODO:" \
+  --pattern "FIXME:" \
+  --pattern "HACK:" \
+  --pattern "XXX:" \
+  --output code_quality_review.txt
 ```
 
-### Pattern Syntax
+#### Scenario 3: Unity Catalog Migration
 
-Patterns are Python regular expressions. Common examples:
+Detect deprecated DBFS patterns and local file writes:
+
+```bash
+uv run scan_databricks_workspace.py \
+  --profile production \
+  --language python \
+  --config patterns_cwd_file_writes.yaml \
+  --output unity_catalog_migration.txt
+```
+
+See [`DBFS_DEPRECATION_NOTICE.md`](DBFS_DEPRECATION_NOTICE.md) for more details on Unity Catalog migration.
+
+#### Scenario 4: Specific Team Audit
+
+Scan a specific team's workspace area:
+
+```bash
+uv run scan_databricks_workspace.py \
+  --profile production \
+  --path /Users/data-engineering-team \
+  --language python \
+  --language sql \
+  --config compliance_patterns.yaml \
+  -g -o data_eng_audit.txt
+```
+
+## Pattern Configuration Files
+
+The repository includes example pattern configurations:
+
+| File | Purpose | Use Case |
+|------|---------|----------|
+| `patterns.yaml.example` | General purpose patterns | Code quality, TODO comments |
+| `patterns.json.example` | JSON format example | Same as YAML, different format |
+| `security_patterns.yaml.example` | Security-focused patterns | Credentials, API keys, secrets |
+| `patterns_cwd_file_writes.yaml` | Local file write detection | Unity Catalog migration, DBFS deprecation |
+| `patterns_cwd_file_writes.json` | JSON version of above | Same patterns, JSON format |
+
+### Using Example Configurations
+
+```bash
+# Copy example and customize
+cp patterns.yaml.example my_patterns.yaml
+nano my_patterns.yaml
+
+# Use custom configuration
+uv run scan_databricks_workspace.py -p prod --config my_patterns.yaml
+```
+
+### Pattern Syntax Reference
+
+Patterns use Python regular expressions (re module):
 
 ```yaml
 patterns:
@@ -252,212 +522,234 @@ patterns:
   # Character classes
   - "api[_-]?key"
 
-  # Capture groups and alternatives
+  # Alternatives (OR)
   - "(password|passwd|pwd)\\s*="
 
-  # Lookahead/lookbehind
+  # Capture groups and quantifiers
   - "password\\s*=\\s*['\"][^'\"]+['\"]"
+
+  # Lookahead
+  - "(?=.*password)(?=.*hardcoded)"
 ```
 
-### Pattern Search Output
+**Important**: In YAML, backslashes must be escaped (`\\`) or use single quotes to avoid interpretation.
 
-When patterns are specified, the scanner will:
-1. List all source files (as usual)
-2. Download and search each file's content
-3. Report all matches with line numbers and context
+## Language Support
 
-Example output:
+### Supported Languages
+
+| Language | File Extensions | Notebook Support |
+|----------|----------------|------------------|
+| Python | .py, .ipynb | ✓ |
+| SQL | .sql | ✓ |
+| Scala | .scala | ✓ |
+| R | .r | ✓ |
+| Java | .java | ✗ |
+| JavaScript | .js | ✗ |
+| TypeScript | .ts | ✗ |
+| Shell | .sh, .bash | ✗ |
+| Go | .go | ✗ |
+| Rust | .rs | ✗ |
+| C | .c, .h | ✗ |
+| C++ | .cpp, .hpp, .cc, .cxx | ✗ |
+| C# | .cs | ✗ |
+| Ruby | .rb | ✗ |
+| Perl | .pl, .pm | ✗ |
+| PHP | .php | ✗ |
+
+### Default Behavior
+
+**By default, only Python files are scanned** (notebooks and .py files). This ensures:
+- Focus on executable code (not config files, docs, etc.)
+- Reduced false positives in pattern matching
+- Faster scans by skipping irrelevant files
+- Practical default for most Databricks environments
+
+To scan other languages, explicitly specify with `--language` or `-l`.
+
+### Why Language Filtering?
+
+Language filtering is critical for accurate scanning:
+
+1. **Executable Code Only**: Excludes .json, .yaml, .md, .txt files
+2. **Reduced False Positives**: "password" in documentation vs. code is different
+3. **Performance**: Skip non-code files for faster scans
+4. **Targeted Analysis**: Focus on specific language ecosystems
+
+## Output Formats
+
+### Console Output
+
+#### Standard Format
 
 ```
-Connected to workspace as: john.doe@company.com
-Workspace URL: https://production.cloud.databricks.com
+Connected to workspace as: user@example.com
+Workspace URL: https://workspace.cloud.databricks.com
 Filtering for languages: python
-
-Compiling 3 search pattern(s)...
-  ✓ password\s*=\s*['"].*['"]
-  ✓ TODO:
-  ✓ api_key
-
 Scanning Databricks workspace starting from: /
-Found 45 source code files
-Found 12 pattern match(es)
+Found 234 source code files
 
-Pattern Matches (12 total):
+Source Code Files:
+--------------------------------------------------------------------------------
+/Users/john.doe/ETL_Pipeline
+/Users/john.doe/Data_Analysis
+...
+```
+
+#### Grouped by Type
+
+```
+NOTEBOOK (145 files):
+--------------------------------------------------------------------------------
+  /Users/john.doe/ETL_Pipeline [PYTHON]
+  /Users/jane.smith/Analytics [SQL]
+
+FILE (89 files):
+--------------------------------------------------------------------------------
+  /Repos/data-platform/src/utils.py
+```
+
+### File Export Format
+
+When using `--output`, results are saved to a text file:
+
+```
+Databricks Workspace Scan Results
 ================================================================================
 
-/Users/john.doe/ETL_Pipeline (3 match(es)):
+Total files: 234
+Total pattern matches: 12
+
+SOURCE CODE FILES
+--------------------------------------------------------------------------------
+
+/Users/john.doe/ETL_Pipeline [NOTEBOOK] [PYTHON]
+/Users/john.doe/Data_Analysis [NOTEBOOK] [SQL]
+/Repos/data-platform/src/utils.py [FILE]
+
+
+PATTERN MATCHES
+================================================================================
+
+/Users/john.doe/ETL_Pipeline (3 matches):
 --------------------------------------------------------------------------------
   Line 15: password = "hardcoded_password_here"
     Pattern: password\s*=\s*['"].*['"]
     Matched: 'password = "hardcoded_password_here"'
-
-  Line 42: # TODO: Refactor this function
-    Pattern: TODO:
-    Matched: 'TODO:'
 ```
 
-## Usage
+See [`OUTPUT_EXAMPLES.md`](OUTPUT_EXAMPLES.md) for complete output examples.
 
-### View Help
+## Performance Considerations
 
+### Scan Performance
+
+| Workspace Size | Without Patterns | With Patterns |
+|----------------|------------------|---------------|
+| Small (<1,000 files) | ~5-10 seconds | ~30-60 seconds |
+| Medium (1,000-10,000) | ~30-60 seconds | ~5-15 minutes |
+| Large (>10,000 files) | ~2-5 minutes | ~15-60 minutes |
+
+**Performance factors:**
+- **Pattern matching**: Downloads every file (slower)
+- **Language filtering**: Reduces files to scan (faster)
+- **Network latency**: Affects download speed
+- **Workspace size**: More files = longer scan
+- **Path specificity**: Narrower paths = faster
+
+### Optimization Tips
+
+1. **Use language filters**: Scan only needed languages
+2. **Specify paths**: Use `--path` to limit scope
+3. **No patterns for inventory**: Omit patterns for faster file listing
+4. **Save to file**: Use `-o` to review results later without re-scanning
+5. **Service principals**: Use SP tokens for better rate limits
+
+### Memory Usage
+
+- **Metadata-only scans**: ~50-100 MB
+- **Pattern matching scans**: ~100-500 MB (depends on file sizes)
+- **Large notebooks**: Can be several MB each
+
+## Troubleshooting
+
+### Authentication Issues
+
+**Problem**: `Failed to connect to Databricks workspace`
+
+**Solutions:**
 ```bash
-uv run scan_databricks_workspace.py --help
-```
+# Verify profile exists
+uv run list_profiles.py
 
-### Basic Scan with Profile
-
-Scan the entire workspace using a profile:
-
-```bash
-uv run scan_databricks_workspace.py --profile production
-```
-
-Or use short flag:
-
-```bash
-uv run scan_databricks_workspace.py -p dev
-```
-
-### Scan with Default Profile or Environment Variables
-
-If you have a DEFAULT profile or environment variables set:
-
-```bash
-uv run scan_databricks_workspace.py
-```
-
-### Scan a Specific Path
-
-Scan starting from a specific directory:
-
-```bash
-uv run scan_databricks_workspace.py --profile dev --path /Users/your.name/projects
-```
-
-### Scan Specific Languages
-
-By default, only Python files are scanned. To scan other languages:
-
-```bash
-# Scan Python and SQL files
-uv run scan_databricks_workspace.py -p dev --language python --language sql
-
-# Or use short form
-uv run scan_databricks_workspace.py -p dev -l python -l sql
-
-# Scan all supported languages
-uv run scan_databricks_workspace.py -p production --language all
-```
-
-### Group Results by Type
-
-Display results grouped by file type (NOTEBOOK, FILE):
-
-```bash
-uv run scan_databricks_workspace.py -p production --group-by-type
-```
-
-Or use short flag:
-
-```bash
-uv run scan_databricks_workspace.py -p production -g
-```
-
-### Export Results to File
-
-Save the results to a text file:
-
-```bash
-uv run scan_databricks_workspace.py -p production -o results.txt
-```
-
-### Combined Example
-
-```bash
+# Test with explicit credentials
 uv run scan_databricks_workspace.py \
-  --profile production \
-  --path /Users/your.name \
-  --group-by-type \
-  --output my_source_files.txt
+  --host "https://your-workspace.cloud.databricks.com" \
+  --token "your-token"
+
+# Check environment variables
+echo $DATABRICKS_HOST
+echo $DATABRICKS_TOKEN
 ```
 
-Or using short flags:
+### Permission Errors
 
+**Problem**: `Could not access /path/to/directory: Forbidden`
+
+**Solutions:**
+- Verify you have read access to the directory
+- Check that your token hasn't expired
+- Ensure you're scanning paths you have permission to read
+- Try scanning your own user directory: `--path /Users/your.email@company.com`
+
+### Pattern Match Issues
+
+**Problem**: No pattern matches found when expected
+
+**Solutions:**
 ```bash
-uv run scan_databricks_workspace.py -p production --path /Users/your.name -g -o results.txt
+# Verify pattern syntax
+python3 -c "import re; re.compile(r'your-pattern')"
+
+# Test with simpler pattern
+uv run scan_databricks_workspace.py -p dev --pattern "TODO"
+
+# Check language filter
+uv run scan_databricks_workspace.py -p dev -l all --pattern "your-pattern"
+
+# Verify files exist
+uv run scan_databricks_workspace.py -p dev --path /your/path -g
 ```
 
-## Output Example
+### Binary File Warnings
 
-When you run the scanner, you'll see connection information followed by the scan results:
+**Problem**: `Could not decode /path/to/file: not a text file`
 
-```
-Connected to workspace as: john.doe@company.com
-Workspace URL: https://production.cloud.databricks.com
-Using profile: production
-Filtering for languages: python
-Scanning Databricks workspace starting from: /
-Found 45 source code files
+**Explanation**: Binary files (images, PDFs, etc.) cannot be searched. This is expected behavior.
 
-NOTEBOOK (45 files):
---------------------------------------------------------------------------------
-  /Users/john.doe/ETL_Pipeline [PYTHON]
-  /Users/john.doe/Data_Analysis [SQL]
-  /Users/jane.smith/ML_Model [SCALA]
-  ...
+**Solution**: Warnings are informational only; scan continues with other files.
 
-FILE (82 files):
---------------------------------------------------------------------------------
-  /Repos/project/src/utils.py
-  /Repos/project/config.yaml
-  /Repos/project/setup.sh
-  ...
-```
+### Large Workspace Timeouts
 
-## Supported File Types
+**Problem**: Scan times out or hangs on large workspaces
 
-The scanner only scans **executable code files** based on the language filter. By default (Python only):
-
-- **Python Notebooks**: Databricks notebooks with Python language
-- **Python Files**: .py, .ipynb
-
-When multiple languages are specified, it includes:
-
-- **SQL Notebooks and Files**: .sql
-- **Scala Notebooks and Files**: .scala
-- **R Notebooks and Files**: .r
-- **Java**: .java
-- **JavaScript/TypeScript**: .js, .ts
-- **Shell Scripts**: .sh, .bash
-- **Other Languages**: .go, .rs, .c, .cpp, .cs, .rb, .pl, .php
-
-**Note**: Configuration files (.json, .yaml, .yml), documentation (.md, .rst), and infrastructure files (.tf) are **not scanned** to ensure you only search executable code.
-
-## Error Handling
-
-The script will:
-- Continue scanning even if some directories are inaccessible
-- Print warnings for directories that cannot be accessed
-- Skip files that cannot be downloaded (permissions, binary files, etc.)
-- Skip files that cannot be decoded (binary files, unsupported encodings)
-- Return exit code 0 on success, 1 on error
-
-When downloading files for pattern matching:
-- Binary files are automatically skipped with a warning
-- Files with unsupported encodings are skipped with a warning
-- Permission errors are reported but don't stop the scan
+**Solutions:**
+- Scan specific directories instead of entire workspace
+- Use language filters to reduce file count
+- Run scan during off-peak hours
+- Increase timeout if using programmatic access
 
 ## Helper Scripts
 
-### List Available Profiles
+### list_profiles.py
 
-Use the `list_profiles.py` script to see all configured Databricks CLI profiles:
+Lists all configured Databricks CLI profiles:
 
 ```bash
 uv run list_profiles.py
 ```
 
-Example output:
+**Output:**
 ```
 Databricks CLI Profiles from /Users/john/.databrickscfg:
 ================================================================================
@@ -478,64 +770,157 @@ To use a profile:
   uv run scan_databricks_workspace.py --profile PROFILE_NAME
 ```
 
-## Quick Reference
-
-```bash
-# Authentication flags
--p, --profile PROFILE     Use profile from ~/.databrickscfg
-    --host HOST          Databricks workspace URL
-    --token TOKEN        Personal access token
-
-# Scan options
-    --path PATH          Starting path to scan (default: /)
--l, --language LANG      Language to scan (default: python)
--g, --group-by-type      Group results by file type
--o, --output FILE        Export results to file
-
-# Pattern matching
-    --pattern REGEX      Regex pattern to search (can repeat)
--c, --config FILE        Config file with patterns (YAML/JSON)
-
-# Helper commands
-uv run list_profiles.py                    List available profiles
-uv run scan_databricks_workspace.py --help Show all options
-
-# Basic examples (Python only by default)
-uv run scan_databricks_workspace.py -p production
-uv run scan_databricks_workspace.py -p dev --path /Users/me -g -o results.txt
-
-# Language filtering examples
-uv run scan_databricks_workspace.py -p prod -l python -l sql
-uv run scan_databricks_workspace.py -p prod --language all
-
-# Pattern search examples
-uv run scan_databricks_workspace.py -p dev --pattern "TODO:"
-uv run scan_databricks_workspace.py -p prod -l python --config security_patterns.yaml -o scan.txt
-uv run scan_databricks_workspace.py -p dev -l python -l scala --pattern "password" -g
-```
-
-## Security Notes
-
-- Never commit your access token to version control
-- Use environment variables or secure credential management
-- Tokens should be treated as passwords
-- Consider using short-lived tokens for scanning operations
-- Use Databricks CLI profiles for easier and more secure credential management
-- Use pattern matching to scan for hardcoded credentials and security issues
-- Review `security_patterns.yaml.example` for common security anti-patterns
-- Be cautious when downloading workspace content - ensure you have proper authorization
-
 ## Files in This Repository
 
 ```
-databricks_scan_code/
-├── scan_databricks_workspace.py    # Main scanner script
-├── list_profiles.py                 # Helper to list Databricks profiles
-├── pyproject.toml                   # Project configuration
-├── patterns.yaml.example            # Example general patterns
-├── patterns.json.example            # Example patterns (JSON format)
-├── security_patterns.yaml.example   # Example security-focused patterns
-├── .env.example                     # Environment variables template
-├── .gitignore                       # Git ignore configuration
-└── README.md                        # This file
+databricks_code_scan/
+├── scan_databricks_workspace.py     # Main scanner script
+├── list_profiles.py                 # Profile listing helper
+├── pyproject.toml                   # Project metadata and dependencies
+├── uv.lock                          # Dependency lock file (uv)
+├── README.md                        # This file
+├── PATTERNS_USAGE.md                # Pattern configuration guide
+├── OUTPUT_EXAMPLES.md               # Example scan outputs
+├── DBFS_DEPRECATION_NOTICE.md       # Unity Catalog migration guide
+├── .env.example                     # Environment variable template
+├── .gitignore                       # Git ignore patterns
+├── patterns.yaml.example            # General pattern examples
+├── patterns.json.example            # JSON format pattern examples
+├── security_patterns.yaml.example   # Security-focused patterns
+├── patterns_cwd_file_writes.yaml    # Local file write detection (YAML)
+└── patterns_cwd_file_writes.json    # Local file write detection (JSON)
 ```
+
+## Security Best Practices
+
+### Token Management
+
+1. **Use short-lived tokens**: Generate tokens with 7-30 day lifetime
+2. **Rotate regularly**: Create new tokens before expiration
+3. **Secure storage**: Use environment variables or secure vaults, never hardcode
+4. **Audit token usage**: Review token access logs periodically
+5. **Service principals**: Use SP tokens for automated/scheduled scans
+
+### Scanning Practices
+
+1. **Authorization**: Only scan workspaces you're authorized to access
+2. **Data sensitivity**: Be aware that scan results may contain sensitive information
+3. **Secure results**: Store scan results securely, especially security audits
+4. **Access control**: Limit access to scan results based on need-to-know
+5. **Audit trails**: Maintain logs of security scans for compliance
+
+### Pattern Configuration
+
+1. **Version control**: Store pattern configs in version control (without secrets)
+2. **Peer review**: Have security patterns reviewed by security team
+3. **Regular updates**: Update patterns as new security issues are discovered
+4. **False positive management**: Tune patterns to reduce noise
+5. **Custom patterns**: Create organization-specific patterns for internal policies
+
+## Contributing
+
+Contributions are welcome! Please follow these guidelines:
+
+### Reporting Issues
+
+1. Check existing issues first
+2. Provide clear description of the problem
+3. Include reproduction steps
+4. Share relevant error messages and logs
+5. Specify Python version, OS, and Databricks runtime
+
+### Submitting Changes
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/your-feature`)
+3. Make your changes with clear commit messages
+4. Add or update tests if applicable
+5. Update documentation (README, docstrings)
+6. Submit a pull request with description of changes
+
+### Code Style
+
+- Follow PEP 8 Python style guide
+- Use type hints for function parameters and returns
+- Add docstrings (Google style) for all public functions
+- Keep functions focused and modular
+- Add inline comments for complex logic
+
+## License
+
+This project is provided as-is for use with Databricks environments. Please review your organization's policies regarding workspace scanning before use.
+
+## Support & Contact
+
+- **GitHub Repository**: [https://github.com/LaurentPRAT-DB/databricks_code_scan](https://github.com/LaurentPRAT-DB/databricks_code_scan)
+- **Issues**: Report bugs and request features via GitHub Issues
+- **Discussions**: Use GitHub Discussions for questions and community support
+
+## Additional Documentation
+
+- **[PATTERNS_USAGE.md](PATTERNS_USAGE.md)**: Comprehensive guide to pattern configuration
+- **[OUTPUT_EXAMPLES.md](OUTPUT_EXAMPLES.md)**: Example scan outputs and formats
+- **[DBFS_DEPRECATION_NOTICE.md](DBFS_DEPRECATION_NOTICE.md)**: Unity Catalog migration guide and DBFS deprecation details
+
+## Acknowledgments
+
+Built with:
+- [Databricks SDK for Python](https://docs.databricks.com/dev-tools/python-sdk.html)
+- [PyYAML](https://pyyaml.org/)
+- [uv](https://github.com/astral-sh/uv) - Fast Python package manager
+
+## Quick Reference Card
+
+```bash
+# ===== AUTHENTICATION =====
+# Using profile (recommended)
+-p production, --profile production
+
+# Using environment variables
+export DATABRICKS_HOST="https://..."
+export DATABRICKS_TOKEN="dapi..."
+
+# Using explicit credentials
+--host "https://..." --token "dapi..."
+
+# ===== SCAN OPTIONS =====
+--path /Users/me              # Scan specific path
+-l python -l sql              # Multiple languages
+-l all                        # All languages
+-g, --group-by-type           # Group results by type
+-o results.txt                # Export to file
+
+# ===== PATTERN MATCHING =====
+--pattern "TODO:"             # Inline pattern
+--pattern "password\s*="      # Regex pattern
+-c patterns.yaml              # Config file
+--config security.yaml        # Long form
+
+# ===== COMMON COMMANDS =====
+# List profiles
+uv run list_profiles.py
+
+# Simple scan (Python only)
+uv run scan_databricks_workspace.py -p prod
+
+# Security audit
+uv run scan_databricks_workspace.py -p prod \
+  -l python -l sql \
+  -c security_patterns.yaml \
+  -o audit.txt
+
+# Code quality review
+uv run scan_databricks_workspace.py -p dev \
+  --pattern "TODO:" \
+  --pattern "FIXME:" \
+  -g
+
+# Unity Catalog migration check
+uv run scan_databricks_workspace.py -p prod \
+  -c patterns_cwd_file_writes.yaml \
+  -o uc_migration.txt
+```
+
+---
+
+**Happy Scanning!** 🔍🛡️
