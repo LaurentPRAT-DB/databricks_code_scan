@@ -1,0 +1,514 @@
+# ============================================================================
+# Python Local File Write Detection - Databricks Workspace Scanner
+# ============================================================================
+# Purpose: Detect Python code that saves files to the current working directory
+#          This is critical for Unity Catalog migration and identifying
+#          code that needs refactoring to use proper storage paths.
+#
+# USAGE:
+#   scan_databricks_workspace.py -p PROFILE \
+#     --language python \
+#     --config patterns_python_local_writes.yaml \
+#     --output python_local_writes_scan.txt
+#
+# WHY THIS MATTERS:
+#   - Files written to CWD are saved to cluster driver node (ephemeral)
+#   - Data is lost when cluster terminates
+#   - Limited disk space can cause cluster failures
+#   - Bypasses Unity Catalog governance and auditing
+#   - Not accessible from other nodes or users
+#
+# RECOMMENDED ALTERNATIVES (2026):
+#   Instead of:              Use Unity Catalog Volumes:
+#   -----------              --------------------------
+#   open("file.csv", "w")    → /Volumes/catalog/schema/volume/file.csv
+#   df.to_csv("out.csv")     → df.write.saveAsTable("catalog.schema.table")
+#   np.save("arr.npy")       → /Volumes/catalog/schema/volume/arr.npy
+#
+# ============================================================================
+
+patterns:
+  # ==========================================================================
+  # CATEGORY 1: Basic Python File Operations
+  # ==========================================================================
+
+  # Pattern 1.1: Basic open() with write mode
+  # RISK: High - Direct file write to CWD
+  # MATCHES: open("file.txt", "w"), open('data.csv', 'wb'), open("log.txt", "a")
+  - "open\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*,\\s*[\"'][wa][bt]?[\"']"
+
+  # Pattern 1.2: open() with Path object (relative path)
+  # RISK: High - pathlib Path without absolute path
+  # MATCHES: open(Path("file.txt"), "w"), open(Path('data.csv'))
+  - "open\\s*\\(\\s*Path\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*\\)"
+
+  # Pattern 1.3: with open context manager (write mode)
+  # RISK: High - Common Python pattern for file writing
+  # MATCHES: with open("file.txt", "w") as f:, with open('data.csv', 'wb') as f:
+  - "with\\s+open\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*,\\s*[\"'][wa][bt]?[\"']"
+
+  # Pattern 1.4: pathlib Path.write_text()
+  # RISK: High - Convenient method that writes to CWD if relative
+  # MATCHES: Path("file.txt").write_text("content"), Path('log.txt').write_text(data)
+  - "Path\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*\\)\\.write_text"
+
+  # Pattern 1.5: pathlib Path.write_bytes()
+  # RISK: High - Binary file writing
+  # MATCHES: Path("data.bin").write_bytes(data), Path('image.png').write_bytes(img)
+  - "Path\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*\\)\\.write_bytes"
+
+  # Pattern 1.6: Explicit current directory reference (./)
+  # RISK: Critical - Very explicit CWD usage
+  # MATCHES: "./output.txt", './data.csv', "./logs/app.log"
+  - "[\"']\\.\/[^\"']+[\"']"
+
+  # Pattern 1.7: Path.cwd() usage
+  # RISK: Medium - Explicit CWD reference (may be legitimate for temp files)
+  # MATCHES: Path.cwd() / "file.txt", Path.cwd().joinpath("data.csv")
+  - "Path\\.cwd\\s*\\(\\s*\\)"
+
+  # Pattern 1.8: os.getcwd() usage
+  # RISK: Medium - Explicit CWD reference
+  # MATCHES: os.getcwd(), os.path.join(os.getcwd(), "file.txt")
+  - "os\\.getcwd\\s*\\(\\s*\\)"
+
+  # ==========================================================================
+  # CATEGORY 2: Pandas DataFrame Export Operations
+  # ==========================================================================
+
+  # Pattern 2.1: Pandas to_csv (relative path)
+  # RISK: High - Common data export operation
+  # MATCHES: df.to_csv("output.csv"), results.to_csv('data.csv')
+  - "\\.to_csv\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
+
+  # Pattern 2.2: Pandas to_parquet (relative path)
+  # RISK: High - Large file format, can fill disk
+  # MATCHES: df.to_parquet("data.parquet"), results.to_parquet('output.parquet')
+  - "\\.to_parquet\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
+
+  # Pattern 2.3: Pandas to_excel (relative path)
+  # RISK: Medium - Excel file export
+  # MATCHES: df.to_excel("report.xlsx"), results.to_excel('summary.xlsx')
+  - "\\.to_excel\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
+
+  # Pattern 2.4: Pandas to_json (relative path)
+  # RISK: Medium - JSON export
+  # MATCHES: df.to_json("output.json"), data.to_json('results.json')
+  - "\\.to_json\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
+
+  # Pattern 2.5: Pandas to_pickle (relative path)
+  # RISK: High - Pickle files can be large, security concern
+  # MATCHES: df.to_pickle("data.pkl"), model.to_pickle('trained.pkl')
+  - "\\.to_pickle\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
+
+  # Pattern 2.6: Pandas to_html (relative path)
+  # RISK: Low - HTML table export
+  # MATCHES: df.to_html("report.html"), summary.to_html('table.html')
+  - "\\.to_html\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
+
+  # Pattern 2.7: Pandas to_hdf (relative path)
+  # RISK: High - HDF5 files can be very large
+  # MATCHES: df.to_hdf("data.h5", key='df'), store.to_hdf('storage.h5')
+  - "\\.to_hdf\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
+
+  # Pattern 2.8: Pandas to_feather (relative path)
+  # RISK: Medium - Feather format export
+  # MATCHES: df.to_feather("data.feather"), results.to_feather('output.feather')
+  - "\\.to_feather\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
+
+  # Pattern 2.9: Pandas to_stata (relative path)
+  # RISK: Low - Stata format export
+  # MATCHES: df.to_stata("data.dta"), results.to_stata('output.dta')
+  - "\\.to_stata\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
+
+  # ==========================================================================
+  # CATEGORY 3: NumPy Array Save Operations
+  # ==========================================================================
+
+  # Pattern 3.1: NumPy save (single array)
+  # RISK: High - Binary array files can be large
+  # MATCHES: np.save("array.npy", data), numpy.save('weights.npy', arr)
+  - "np\\.save\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
+
+  # Pattern 3.2: NumPy savetxt (text format)
+  # RISK: Medium - Text array export
+  # MATCHES: np.savetxt("data.txt", arr), numpy.savetxt('matrix.csv', data)
+  - "np\\.savetxt\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
+
+  # Pattern 3.3: NumPy savez (multiple arrays, compressed)
+  # RISK: High - Compressed archive of arrays
+  # MATCHES: np.savez("arrays.npz", a=arr1, b=arr2), numpy.savez('data.npz')
+  - "np\\.savez\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
+
+  # Pattern 3.4: NumPy savez_compressed
+  # RISK: High - Compressed array archive
+  # MATCHES: np.savez_compressed("data.npz", arr), numpy.savez_compressed('arrays.npz')
+  - "np\\.savez_compressed\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
+
+  # ==========================================================================
+  # CATEGORY 4: Serialization Libraries (JSON, Pickle, YAML)
+  # ==========================================================================
+
+  # Pattern 4.1: json.dump to file
+  # RISK: Medium - JSON serialization to file
+  # MATCHES: json.dump(data, open("file.json", "w")), json.dump(cfg, f)
+  - "json\\.dump\\s*\\([^,]+,\\s*open\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*,"
+
+  # Pattern 4.2: pickle.dump to file
+  # RISK: High - Pickle serialization, security concern
+  # MATCHES: pickle.dump(obj, open("data.pkl", "wb")), pickle.dump(model, f)
+  - "pickle\\.dump\\s*\\([^,]+,\\s*open\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*,"
+
+  # Pattern 4.3: yaml.dump to file
+  # RISK: Low - YAML configuration export
+  # MATCHES: yaml.dump(config, open("config.yaml", "w")), yaml.dump(data, f)
+  - "yaml\\.dump\\s*\\([^,]+,\\s*open\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*,"
+
+  # Pattern 4.4: joblib.dump (ML model persistence)
+  # RISK: High - Machine learning model files can be very large
+  # MATCHES: joblib.dump(model, "model.pkl"), joblib.dump(estimator, 'trained.pkl')
+  - "joblib\\.dump\\s*\\([^,]+,\\s*[\"'][^/][^\"']*[\"']"
+
+  # Pattern 4.5: dill.dump (extended pickle)
+  # RISK: High - Extended pickle functionality
+  # MATCHES: dill.dump(obj, open("data.pkl", "wb")), dill.dump(func, f)
+  - "dill\\.dump\\s*\\([^,]+,\\s*open\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*,"
+
+  # ==========================================================================
+  # CATEGORY 5: Machine Learning Model Persistence
+  # ==========================================================================
+
+  # Pattern 5.1: scikit-learn model save (via joblib/pickle)
+  # RISK: High - ML models are large files
+  # MATCHES: Already covered by joblib.dump and pickle.dump patterns
+
+  # Pattern 5.2: TensorFlow model save
+  # RISK: Critical - TensorFlow models can be hundreds of MB
+  # MATCHES: model.save("model"), tf.saved_model.save(model, "model_dir")
+  - "model\\.save\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
+  - "tf\\.saved_model\\.save\\s*\\([^,]+,\\s*[\"'][^/][^\"']*[\"']"
+
+  # Pattern 5.3: Keras model save
+  # RISK: Critical - Keras models can be very large
+  # MATCHES: model.save("model.h5"), model.save('weights.h5')
+  - "\\.save\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*\\)"
+
+  # Pattern 5.4: PyTorch model save
+  # RISK: High - PyTorch state dictionaries
+  # MATCHES: torch.save(model.state_dict(), "model.pth"), torch.save(model, 'weights.pth')
+  - "torch\\.save\\s*\\([^,]+,\\s*[\"'][^/][^\"']*[\"']"
+
+  # ==========================================================================
+  # CATEGORY 6: File Copying and Moving Operations
+  # ==========================================================================
+
+  # Pattern 6.1: shutil.copy (copy to CWD)
+  # RISK: Medium - File copying to local disk
+  # MATCHES: shutil.copy(src, "dest.txt"), shutil.copy(file, 'output.dat')
+  - "shutil\\.copy\\w*\\s*\\([^,]+,\\s*[\"'][^/][^\"']*[\"']"
+
+  # Pattern 6.2: shutil.move (move to CWD)
+  # RISK: Medium - File moving to local disk
+  # MATCHES: shutil.move(src, "dest.txt"), shutil.move(file, 'output.dat')
+  - "shutil\\.move\\s*\\([^,]+,\\s*[\"'][^/][^\"']*[\"']"
+
+  # Pattern 6.3: shutil.copyfile
+  # RISK: Medium - Direct file copy
+  # MATCHES: shutil.copyfile(src, "dest.txt"), shutil.copyfile(orig, 'copy.dat')
+  - "shutil\\.copyfile\\s*\\([^,]+,\\s*[\"'][^/][^\"']*[\"']"
+
+  # ==========================================================================
+  # CATEGORY 7: CSV Module Operations
+  # ==========================================================================
+
+  # Pattern 7.1: csv.writer with file
+  # RISK: Medium - CSV writing
+  # MATCHES: csv.writer(open("data.csv", "w")), csv.writer(f)
+  - "csv\\.writer\\s*\\(\\s*open\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*,"
+
+  # Pattern 7.2: csv.DictWriter with file
+  # RISK: Medium - CSV dictionary writing
+  # MATCHES: csv.DictWriter(open("data.csv", "w"), fieldnames), csv.DictWriter(f, cols)
+  - "csv\\.DictWriter\\s*\\(\\s*open\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*,"
+
+  # ==========================================================================
+  # CATEGORY 8: Image Processing Libraries
+  # ==========================================================================
+
+  # Pattern 8.1: PIL/Pillow image save
+  # RISK: Medium - Image files can be large
+  # MATCHES: img.save("output.png"), image.save('photo.jpg')
+  - "\\.save\\s*\\(\\s*[\"'][^/][^\"']*\\.(png|jpg|jpeg|gif|bmp|tiff)[\"']"
+
+  # Pattern 8.2: matplotlib savefig
+  # RISK: Low - Plot/figure export
+  # MATCHES: plt.savefig("plot.png"), fig.savefig('chart.pdf')
+  - "\\.savefig\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
+
+  # Pattern 8.3: cv2.imwrite (OpenCV)
+  # RISK: Medium - OpenCV image writing
+  # MATCHES: cv2.imwrite("output.png", img), cv2.imwrite('result.jpg', frame)
+  - "cv2\\.imwrite\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
+
+  # ==========================================================================
+  # CATEGORY 9: Archive and Compression Operations
+  # ==========================================================================
+
+  # Pattern 9.1: zipfile creation
+  # RISK: High - ZIP archives can be very large
+  # MATCHES: zipfile.ZipFile("archive.zip", "w"), ZipFile('data.zip', 'w')
+  - "zipfile\\.ZipFile\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
+  - "ZipFile\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
+
+  # Pattern 9.2: tarfile creation
+  # RISK: High - TAR archives can be very large
+  # MATCHES: tarfile.open("archive.tar.gz", "w:gz"), tarfile.open('data.tar', 'w')
+  - "tarfile\\.open\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
+
+  # Pattern 9.3: gzip file writing
+  # RISK: Medium - Compressed file writing
+  # MATCHES: gzip.open("file.gz", "wb"), gzip.open('data.gz', 'wt')
+  - "gzip\\.open\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*,\\s*[\"']w"
+
+  # ==========================================================================
+  # CATEGORY 10: Databricks-Specific Patterns
+  # ==========================================================================
+
+  # Pattern 10.1: dbutils.fs.put with file:/ scheme (local filesystem)
+  # RISK: Critical - Explicit local file write in Databricks
+  # MATCHES: dbutils.fs.put("file:/tmp/output.txt", content, overwrite=True)
+  # NOTE: This writes to the driver node local filesystem
+  - "dbutils\\.fs\\.put\\s*\\(\\s*[\"']file:[^/][^\"']*[\"']"
+
+  # Pattern 10.2: dbutils.fs.cp from DBFS to file:/
+  # RISK: High - Copying from DBFS to local filesystem
+  # MATCHES: dbutils.fs.cp("dbfs:/path", "file:/local/path"), dbutils.fs.cp("/dbfs/", "file:/")
+  - "dbutils\\.fs\\.cp\\s*\\([^,]+,\\s*[\"']file:"
+
+  # ==========================================================================
+  # CATEGORY 11: Logging to Files
+  # ==========================================================================
+
+  # Pattern 11.1: logging.FileHandler with relative path
+  # RISK: Low - Log files (usually small, but can grow)
+  # MATCHES: logging.FileHandler("app.log"), FileHandler('debug.log')
+  - "logging\\.FileHandler\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
+  - "FileHandler\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
+
+  # Pattern 11.2: logging.config with filename
+  # RISK: Low - Logging configuration with file output
+  # MATCHES: filename='app.log', filename = "debug.log"
+  - "filename\\s*=\\s*[\"'][^/][^\"']*\\.log[\"']"
+
+  # ==========================================================================
+  # CATEGORY 12: Database Export Operations
+  # ==========================================================================
+
+  # Pattern 12.1: SQLite database creation
+  # RISK: High - SQLite databases can grow large
+  # MATCHES: sqlite3.connect("database.db"), sqlite3.connect('data.sqlite')
+  - "sqlite3\\.connect\\s*\\(\\s*[\"'][^/:][^\"']*\\.\\w+[\"']"
+
+  # Pattern 12.2: CSV export from database results
+  # RISK: Medium - Already covered by Pandas to_csv, but catch raw cursor exports
+  # MATCHES: cursor.copy_to(open("export.csv", "w"))
+  - "cursor\\.copy_to\\s*\\(\\s*open\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
+
+  # ==========================================================================
+  # CATEGORY 13: Excel Libraries (openpyxl, xlsxwriter)
+  # ==========================================================================
+
+  # Pattern 13.1: openpyxl workbook save
+  # RISK: Medium - Excel files
+  # MATCHES: wb.save("workbook.xlsx"), workbook.save('output.xlsx')
+  - "\\.save\\s*\\(\\s*[\"'][^/][^\"']*\\.xlsx?[\"']"
+
+  # Pattern 13.2: xlsxwriter workbook
+  # RISK: Medium - Excel file creation
+  # MATCHES: xlsxwriter.Workbook("output.xlsx"), Workbook('data.xlsx')
+  - "xlsxwriter\\.Workbook\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
+  - "Workbook\\s*\\(\\s*[\"'][^/][^\"']*\\.xlsx?[\"']"
+
+  # ==========================================================================
+  # CATEGORY 14: Temporary Files (Lower Risk but Worth Tracking)
+  # ==========================================================================
+
+  # Pattern 14.1: tempfile with specific directory (if CWD)
+  # RISK: Low - Temporary files in CWD
+  # MATCHES: tempfile.NamedTemporaryFile(dir="."), TemporaryFile(dir="./temp")
+  - "tempfile\\.\\w+\\s*\\([^)]*dir\\s*=\\s*[\"']\\."
+  - "TemporaryFile\\s*\\([^)]*dir\\s*=\\s*[\"']\\."
+
+# ============================================================================
+# PATTERN CATEGORIES SUMMARY
+# ============================================================================
+# 1.  Basic Python File Operations (8 patterns)
+# 2.  Pandas DataFrame Exports (9 patterns)
+# 3.  NumPy Array Operations (4 patterns)
+# 4.  Serialization Libraries (5 patterns)
+# 5.  ML Model Persistence (4 patterns)
+# 6.  File Copy/Move Operations (3 patterns)
+# 7.  CSV Module Operations (2 patterns)
+# 8.  Image Processing (3 patterns)
+# 9.  Archive/Compression (3 patterns)
+# 10. Databricks-Specific (2 patterns)
+# 11. Logging to Files (2 patterns)
+# 12. Database Exports (2 patterns)
+# 13. Excel Libraries (2 patterns)
+# 14. Temporary Files (1 pattern)
+#
+# TOTAL: 50+ patterns covering Python local file writes
+#
+# ============================================================================
+# RISK LEVELS EXPLAINED
+# ============================================================================
+#
+# CRITICAL: Immediate action required
+#   - Large files (ML models, TensorFlow saves, archives)
+#   - Explicit Databricks local writes (dbutils.fs.put with file:/)
+#   - Can cause cluster failures or data loss
+#
+# HIGH: Should be refactored soon
+#   - Common data exports (CSV, Parquet, Pickle)
+#   - NumPy arrays and pandas operations
+#   - ML model persistence
+#   - Direct file operations with write mode
+#
+# MEDIUM: Review and consider refactoring
+#   - Image files, Excel exports
+#   - File copying operations
+#   - Logging configurations
+#   - Archive creation
+#
+# LOW: Monitor but may be acceptable
+#   - Temporary files in CWD
+#   - HTML exports
+#   - Small log files
+#   - Plot/chart exports
+#
+# ============================================================================
+# UNITY CATALOG MIGRATION GUIDE
+# ============================================================================
+#
+# STEP 1: Create Unity Catalog Volume
+#   SQL:
+#     CREATE CATALOG IF NOT EXISTS my_catalog;
+#     CREATE SCHEMA IF NOT EXISTS my_catalog.my_schema;
+#     CREATE VOLUME IF NOT EXISTS my_catalog.my_schema.data_volume;
+#
+# STEP 2: Update Python code to use Volume paths
+#
+#   BEFORE (writes to CWD - ephemeral):
+#     df.to_csv("output.csv")
+#     np.save("array.npy", data)
+#     model.save("model.h5")
+#
+#   AFTER (writes to Unity Catalog Volume - persistent):
+#     df.to_csv("/Volumes/my_catalog/my_schema/data_volume/output.csv")
+#     np.save("/Volumes/my_catalog/my_schema/data_volume/array.npy", data)
+#     model.save("/Volumes/my_catalog/my_schema/data_volume/model.h5")
+#
+# STEP 3: For structured data, use Delta tables instead
+#
+#   BEFORE:
+#     df.to_csv("data.csv")
+#     spark_df = spark.createDataFrame(df)
+#
+#   AFTER (RECOMMENDED):
+#     spark_df = spark.createDataFrame(df)
+#     spark_df.write.format("delta").saveAsTable("my_catalog.my_schema.my_table")
+#     # Or read back:
+#     df = spark.table("my_catalog.my_schema.my_table").toPandas()
+#
+# STEP 4: Test and verify
+#   - Verify files persist after cluster restart
+#   - Check Unity Catalog permissions apply
+#   - Ensure other users can access (if needed)
+#   - Monitor disk usage in Volume
+#
+# ============================================================================
+# EXAMPLE SCAN COMMANDS
+# ============================================================================
+#
+# 1. Basic scan for Python local writes:
+#    scan_databricks_workspace.py -p production \
+#      -l python \
+#      -c patterns_python_local_writes.yaml \
+#      -o python_local_writes.txt
+#
+# 2. Scan specific user directory:
+#    scan_databricks_workspace.py -p prod \
+#      -l python \
+#      --path /Users/data.engineer@company.com \
+#      -c patterns_python_local_writes.yaml \
+#      -g -o user_scan.txt
+#
+# 3. Scan with grouped output for easier review:
+#    scan_databricks_workspace.py -p dev \
+#      -l python \
+#      -c patterns_python_local_writes.yaml \
+#      --group-by-type \
+#      -o grouped_results.txt
+#
+# 4. Combine with other patterns for comprehensive audit:
+#    scan_databricks_workspace.py -p prod \
+#      -l python -l sql \
+#      --pattern "dbfs:/" \
+#      -c patterns_python_local_writes.yaml \
+#      -o comprehensive_audit.txt
+#
+# ============================================================================
+# INTERPRETING RESULTS
+# ============================================================================
+#
+# HIGH PRIORITY (Fix First):
+#   - ML model saves (model.save, torch.save, joblib.dump)
+#   - Large data exports (to_parquet, to_csv on big datasets)
+#   - Archive operations (zipfile, tarfile)
+#   - dbutils.fs.put with file:/ scheme
+#
+# MEDIUM PRIORITY (Plan Refactoring):
+#   - Pandas exports in scheduled jobs
+#   - NumPy array saves in production notebooks
+#   - Image processing outputs that need persistence
+#   - SQLite database creation
+#
+# LOW PRIORITY (Monitor/Document):
+#   - Temporary files that are cleaned up
+#   - One-time analysis outputs
+#   - Log files (consider using cluster logs instead)
+#   - Debug/development code
+#
+# ============================================================================
+# FALSE POSITIVES TO IGNORE
+# ============================================================================
+#
+# Some patterns may match legitimate use cases:
+#   1. Code examples in comments or docstrings
+#   2. Error handling that catches file operations
+#   3. Test code that writes to /tmp
+#   4. Deliberately temporary files within a job
+#   5. Files immediately uploaded to cloud storage
+#
+# Review each match to determine if it's a true issue.
+#
+# ============================================================================
+# ADDITIONAL RESOURCES
+# ============================================================================
+#
+# Databricks Documentation:
+#   - Unity Catalog Volumes:
+#     https://docs.databricks.com/en/volumes/
+#
+#   - Best Practices for File Storage:
+#     https://docs.databricks.com/en/files/
+#
+#   - DBFS to Unity Catalog Migration:
+#     https://docs.databricks.com/en/dbfs/unity-catalog.html
+#
+# See also:
+#   - DBFS_DEPRECATION_NOTICE.md in this repository
+#   - PATTERNS_USAGE.md for pattern configuration guide
+#
+# Last Updated: January 2026
+# ============================================================================
