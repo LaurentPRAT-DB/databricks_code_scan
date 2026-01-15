@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+build/
+dist/
+*.egg-info/
+.uv/
+
+# Environment variables
+.env
+*.env
+
+# Output files
+results.txt
+*_report.txt
+*_scan.txt
+
+# Config files (keep examples)
+patterns.yaml
+patterns.json
+security_patterns.yaml
+!*.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

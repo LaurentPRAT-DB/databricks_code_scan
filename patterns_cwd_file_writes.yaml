@@ -1,0 +1,89 @@
+# Pattern Configuration for Databricks Workspace Scanner
+# Purpose: Detect Python code that saves files to the current working directory
+# Usage: python scan_databricks_workspace.py --config patterns_cwd_file_writes.yaml
+
+patterns:
+  # Basic file open in write mode without full path (relative paths only)
+  # Matches: open("file.txt", "w"), open('data.csv', 'wb'), etc.
+  - "open\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*,\\s*[\"'][wa][bt]?[\"']"
+
+  # File open with Path or pathlib without absolute path
+  # Matches: open(Path("file.txt"), "w"), etc.
+  - "open\\s*\\(\\s*Path\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*\\)"
+
+  # Pandas DataFrame to_csv without full path
+  # Matches: df.to_csv("output.csv"), to_csv('data.csv'), etc.
+  - "\\.to_csv\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
+
+  # Pandas DataFrame to_parquet without full path
+  # Matches: df.to_parquet("data.parquet"), etc.
+  - "\\.to_parquet\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
+
+  # Pandas DataFrame to_excel without full path
+  # Matches: df.to_excel("report.xlsx"), etc.
+  - "\\.to_excel\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
+
+  # Pandas DataFrame to_json without full path
+  # Matches: df.to_json("output.json"), etc.
+  - "\\.to_json\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
+
+  # Pandas DataFrame to_pickle without full path
+  # Matches: df.to_pickle("data.pkl"), etc.
+  - "\\.to_pickle\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
+
+  # Pandas DataFrame to_html without full path
+  # Matches: df.to_html("report.html"), etc.
+  - "\\.to_html\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
+
+  # Path.cwd() usage - explicit current directory references
+  # Matches: Path.cwd() / "file.txt", Path.cwd().joinpath("data.csv"), etc.
+  - "Path\\.cwd\\s*\\(\\s*\\)"
+
+  # os.getcwd() usage - explicit current directory references
+  # Matches: os.getcwd(), os.path.join(os.getcwd(), "file"), etc.
+  - "os\\.getcwd\\s*\\(\\s*\\)"
+
+  # pathlib Path write_text without full path
+  # Matches: Path("file.txt").write_text("content"), etc.
+  - "Path\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*\\)\\.write_text"
+
+  # pathlib Path write_bytes without full path
+  # Matches: Path("data.bin").write_bytes(data), etc.
+  - "Path\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*\\)\\.write_bytes"
+
+  # File paths starting with ./ (explicit current directory)
+  # Matches: "./output.txt", './data.csv', etc.
+  - "[\"']\\.\/[^\"']+[\"']"
+
+  # numpy save operations without full path
+  # Matches: np.save("array.npy", data), np.savetxt("data.txt", arr), etc.
+  - "np\\.save\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
+  - "np\\.savetxt\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
+  - "np\\.savez\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
+
+  # JSON dump to file without full path
+  # Matches: json.dump(data, open("file.json", "w")), etc.
+  - "json\\.dump\\s*\\([^,]+,\\s*open\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*,"
+
+  # pickle dump to file without full path
+  # Matches: pickle.dump(obj, open("data.pkl", "wb")), etc.
+  - "pickle\\.dump\\s*\\([^,]+,\\s*open\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*,"
+
+  # shutil copy operations to current directory (no destination path)
+  # Matches: shutil.copy(src, "file.txt"), shutil.copyfile(src, "output.dat"), etc.
+  - "shutil\\.copy\\w*\\s*\\([^,]+,\\s*[\"'][^/][^\"']*[\"']"
+
+  # with open statement for files in current directory
+  # Matches: with open("file.txt", "w") as f:, etc.
+  - "with\\s+open\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*,\\s*[\"'][wa][bt]?[\"']"
+
+  # CSV writer to file without full path
+  # Matches: csv.writer(open("data.csv", "w")), etc.
+  - "csv\\.writer\\s*\\(\\s*open\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*,"
+
+  # YAML/JSON file writes without full path
+  - "yaml\\.dump\\s*\\([^,]+,\\s*open\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*,"
+
+  # dbutils.fs.put operations with relative paths (Databricks specific)
+  # Matches: dbutils.fs.put("file:/file.txt", ...), etc.
+  - "dbutils\\.fs\\.put\\s*\\(\\s*[\"']file:[^/][^\"']*[\"']"

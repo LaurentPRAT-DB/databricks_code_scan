@@ -1,0 +1,33 @@
+# Example pattern configuration file for Databricks workspace scanner
+# This file defines regex patterns to search for in source code files
+
+# Patterns are regular expressions that will be matched against each line
+# of code in your Databricks workspace
+
+patterns:
+  # Security-related patterns
+  - "password\\s*=\\s*['\"].*['\"]"
+  - "api[_-]?key\\s*=\\s*['\"].*['\"]"
+  - "secret\\s*=\\s*['\"].*['\"]"
+  - "token\\s*=\\s*['\"].*['\"]"
+  - "AWS_SECRET_ACCESS_KEY"
+  - "DATABRICKS_TOKEN"
+
+  # Code quality markers
+  - "TODO:"
+  - "FIXME:"
+  - "XXX:"
+  - "HACK:"
+  - "BUG:"
+
+  # Deprecated Databricks APIs (examples)
+  - "sc\\.parallelize"  # Old RDD API
+  - "sqlContext"  # Deprecated in favor of SparkSession
+  - "dbutils\\.notebook\\.exit\\(\\)"
+
+  # Hardcoded values that might need attention
+  - "s3://[a-zA-Z0-9\\-_./]+"  # S3 paths
+  - "jdbc:[a-z]+://[^\\s'\"]+"  # JDBC connection strings
+
+# Usage:
+#   uv run scan_databricks_workspace.py --config patterns.yaml --profile myprofile

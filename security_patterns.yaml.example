@@ -1,0 +1,47 @@
+# Security-focused pattern configuration
+# Use this to scan for potential security issues in your Databricks workspace
+
+patterns:
+  # Hardcoded credentials
+  - "password\\s*=\\s*['\"][^'\"]+['\"]"
+  - "passwd\\s*=\\s*['\"][^'\"]+['\"]"
+  - "pwd\\s*=\\s*['\"][^'\"]+['\"]"
+  - "api[_-]?key\\s*=\\s*['\"][^'\"]+['\"]"
+  - "secret[_-]?key\\s*=\\s*['\"][^'\"]+['\"]"
+  - "access[_-]?key\\s*=\\s*['\"][^'\"]+['\"]"
+  - "auth[_-]?token\\s*=\\s*['\"][^'\"]+['\"]"
+  - "bearer\\s+[a-zA-Z0-9\\-_\\.]+="
+
+  # AWS credentials
+  - "AKIA[0-9A-Z]{16}"  # AWS Access Key ID pattern
+  - "AWS_SECRET_ACCESS_KEY"
+  - "AWS_ACCESS_KEY_ID"
+
+  # Private keys
+  - "BEGIN.*PRIVATE KEY"
+  - "BEGIN RSA PRIVATE KEY"
+  - "BEGIN OPENSSH PRIVATE KEY"
+
+  # Database connection strings with credentials
+  - "jdbc:[a-z]+://[^:]+:[^@]+@"
+  - "mongodb://[^:]+:[^@]+@"
+  - "postgres://[^:]+:[^@]+@"
+
+  # Token patterns
+  - "dapi[a-z0-9]{32}"  # Databricks token pattern
+  - "ghp_[a-zA-Z0-9]{36}"  # GitHub personal access token
+  - "glpat-[a-zA-Z0-9\\-_]{20}"  # GitLab personal access token
+
+  # Insecure practices
+  - "verify\\s*=\\s*False"  # SSL verification disabled
+  - "ssl_verify\\s*=\\s*False"
+  - "SSLVERIFY\\s*=\\s*false"
+  - "requests\\.get\\([^)]*verify\\s*=\\s*False"
+
+  # SQL injection risk patterns
+  - "execute\\([^)]*\\+[^)]*\\)"
+  - "cursor\\.execute\\([^)]*%"
+  - "raw_sql\\s*=\\s*['\"].*\\{.*['\"]"
+
+# Usage:
+#   uv run scan_databricks_workspace.py --config security_patterns.yaml -p production -o security_report.txt

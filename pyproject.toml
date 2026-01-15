@@ -1,0 +1,16 @@
+# This file is optional - the scripts use inline metadata (PEP 723)
+# and can be run directly with: uv run scan_databricks_workspace.py
+#
+# This configuration is provided for compatibility if you want to
+# install dependencies separately with: uv pip install databricks-sdk
+
+[project]
+name = "databricks-workspace-scanner"
+version = "0.1.0"
+description = "Scan Databricks workspace for source code files"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "databricks-sdk>=0.20.0",
+    "pyyaml>=6.0",
+]

@@ -1,0 +1,30 @@
+{
+  "_comment": "Pattern Configuration for Databricks Workspace Scanner - JSON Format",
+  "_purpose": "Detect Python code that saves files to the current working directory",
+  "_usage": "python scan_databricks_workspace.py --config patterns_cwd_file_writes.json",
+  "patterns": [
+    "open\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*,\\s*[\"'][wa][bt]?[\"']",
+    "open\\s*\\(\\s*Path\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*\\)",
+    "\\.to_csv\\s*\\(\\s*[\"'][^/][^\"']*[\"']",
+    "\\.to_parquet\\s*\\(\\s*[\"'][^/][^\"']*[\"']",
+    "\\.to_excel\\s*\\(\\s*[\"'][^/][^\"']*[\"']",
+    "\\.to_json\\s*\\(\\s*[\"'][^/][^\"']*[\"']",
+    "\\.to_pickle\\s*\\(\\s*[\"'][^/][^\"']*[\"']",
+    "\\.to_html\\s*\\(\\s*[\"'][^/][^\"']*[\"']",
+    "Path\\.cwd\\s*\\(\\s*\\)",
+    "os\\.getcwd\\s*\\(\\s*\\)",
+    "Path\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*\\)\\.write_text",
+    "Path\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*\\)\\.write_bytes",
+    "[\"']\\.\/[^\"']+[\"']",
+    "np\\.save\\s*\\(\\s*[\"'][^/][^\"']*[\"']",
+    "np\\.savetxt\\s*\\(\\s*[\"'][^/][^\"']*[\"']",
+    "np\\.savez\\s*\\(\\s*[\"'][^/][^\"']*[\"']",
+    "json\\.dump\\s*\\([^,]+,\\s*open\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*,",
+    "pickle\\.dump\\s*\\([^,]+,\\s*open\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*,",
+    "shutil\\.copy\\w*\\s*\\([^,]+,\\s*[\"'][^/][^\"']*[\"']",
+    "with\\s+open\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*,\\s*[\"'][wa][bt]?[\"']",
+    "csv\\.writer\\s*\\(\\s*open\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*,",
+    "yaml\\.dump\\s*\\([^,]+,\\s*open\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*,",
+    "dbutils\\.fs\\.put\\s*\\(\\s*[\"']file:[^/][^\"']*[\"']"
+  ]
+}
