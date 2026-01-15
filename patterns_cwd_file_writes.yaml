@@ -1,89 +1,445 @@
+# ============================================================================
 # Pattern Configuration for Databricks Workspace Scanner
+# ============================================================================
 # Purpose: Detect Python code that saves files to the current working directory
-# Usage: python scan_databricks_workspace.py --config patterns_cwd_file_writes.yaml
+#
+# BASIC USAGE:
+#   scan_databricks_workspace.py -p PROFILE --config patterns_cwd_file_writes.yaml
+#
+# FOR EASIER-TO-READ OUTPUT:
+#
+#   1. SAVE TO FILE (Recommended for large scans):
+#      scan_databricks_workspace.py -p PROFILE \
+#        --config patterns_cwd_file_writes.yaml \
+#        --output results.txt
+#
+#      Then view with: less results.txt  or  cat results.txt
+#
+#   2. GROUP BY TYPE (organized by file type):
+#      scan_databricks_workspace.py -p PROFILE \
+#        --config patterns_cwd_file_writes.yaml \
+#        --group-by-type
+#
+#   3. FILTER BY LANGUAGE (reduce noise):
+#      scan_databricks_workspace.py -p PROFILE \
+#        --config patterns_cwd_file_writes.yaml \
+#        --language python
+#
+#   4. SCAN SPECIFIC PATH (faster, more focused):
+#      scan_databricks_workspace.py -p PROFILE \
+#        --config patterns_cwd_file_writes.yaml \
+#        --path /Users/your.name
+#
+#   5. COMBINE ALL FOR BEST RESULTS:
+#      scan_databricks_workspace.py -p PROFILE \
+#        --config patterns_cwd_file_writes.yaml \
+#        --language python \
+#        --path /Users/your.name \
+#        --group-by-type \
+#        --output results.txt
+#
+# OUTPUT FORMAT EXPLANATION:
+#   - Console output shows: files found, patterns matched, grouped by file
+#   - Output file contains: detailed match info with line numbers and context
+#   - Each match shows: file path, line number, pattern used, matched text
+#
+# TIPS FOR READABLE OUTPUT:
+#   - Use --output to save results for later review
+#   - Use --group-by-type to organize by file type
+#   - Use --language to filter specific languages (python, sql, scala, r)
+#   - Use --path to scan specific directories only
+#   - Pipe output through less for pagination: ... | less
+#   - Search in output file: grep "pattern" results.txt
+# ============================================================================
 
 patterns:
-  # Basic file open in write mode without full path (relative paths only)
-  # Matches: open("file.txt", "w"), open('data.csv', 'wb'), etc.
+  # ========================================
+  # PATTERN 1: Basic file open in write mode
+  # ========================================
+  # WHAT: Detects basic Python file open() calls with write modes
+  # WHY: Files opened in write mode without absolute path save to current working directory
+  # MATCHES: open("file.txt", "w"), open('data.csv', 'wb'), open("report.txt", "a")
+  # REGEX EXPLAINED:
+  #   open\\s*\\(           - 'open' function with optional whitespace before (
+  #   \\s*[\"'][^/]         - quote char, first char is NOT / (excludes absolute paths)
+  #   [^\"']*[\"']          - filename characters, closing quote
+  #   \\s*,\\s*             - comma separator with optional whitespace
+  #   [\"'][wa][bt]?[\"']   - mode: 'w', 'wb', 'a', 'ab', 'wt', 'at' (write/append modes)
+  # RISK: Data may be written to unpredictable location; cluster driver node has limited space
   - "open\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*,\\s*[\"'][wa][bt]?[\"']"
 
-  # File open with Path or pathlib without absolute path
-  # Matches: open(Path("file.txt"), "w"), etc.
+  # ========================================
+  # PATTERN 2: File open with Path object
+  # ========================================
+  # WHAT: Detects open() with pathlib.Path object without absolute path
+  # WHY: Path("file.txt") creates relative path in current working directory
+  # MATCHES: open(Path("file.txt"), "w"), open(Path('data.csv'))
+  # REGEX EXPLAINED:
+  #   open\\s*\\(\\s*Path\\s*\\( - open function calling Path constructor
+  #   \\s*[\"'][^/][^\"']*[\"']  - relative filename (not starting with /)
+  # RISK: Same as basic open(), but with pathlib syntax
   - "open\\s*\\(\\s*Path\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*\\)"
 
-  # Pandas DataFrame to_csv without full path
-  # Matches: df.to_csv("output.csv"), to_csv('data.csv'), etc.
+  # ========================================
+  # PATTERN 3: Pandas DataFrame to_csv
+  # ========================================
+  # WHAT: Detects pandas DataFrame.to_csv() saving to relative path
+  # WHY: Common way to export data; saves to CWD if no path specified
+  # MATCHES: df.to_csv("output.csv"), results.to_csv('data.csv')
+  # REGEX EXPLAINED:
+  #   \\.to_csv\\s*\\(          - .to_csv method call
+  #   \\s*[\"'][^/][^\"']*[\"'] - relative filename argument
+  # RISK: Large CSV files can fill up driver node disk space; data saved locally instead of DBFS
   - "\\.to_csv\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
 
-  # Pandas DataFrame to_parquet without full path
-  # Matches: df.to_parquet("data.parquet"), etc.
+  # ========================================
+  # PATTERN 4: Pandas DataFrame to_parquet
+  # ========================================
+  # WHAT: Detects pandas DataFrame.to_parquet() saving to relative path
+  # WHY: Parquet export to local disk instead of distributed storage
+  # MATCHES: df.to_parquet("data.parquet"), results.to_parquet('output.parquet')
+  # REGEX EXPLAINED:
+  #   \\.to_parquet\\s*\\(      - .to_parquet method call
+  #   \\s*[\"'][^/][^\"']*[\"'] - relative filename argument
+  # RISK: Large parquet files on driver node; should use DBFS or cloud storage paths
   - "\\.to_parquet\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
 
-  # Pandas DataFrame to_excel without full path
-  # Matches: df.to_excel("report.xlsx"), etc.
+  # ========================================
+  # PATTERN 5: Pandas DataFrame to_excel
+  # ========================================
+  # WHAT: Detects pandas DataFrame.to_excel() saving to relative path
+  # WHY: Excel export to local filesystem
+  # MATCHES: df.to_excel("report.xlsx"), results.to_excel('summary.xlsx')
+  # REGEX EXPLAINED:
+  #   \\.to_excel\\s*\\(        - .to_excel method call
+  #   \\s*[\"'][^/][^\"']*[\"'] - relative filename argument
+  # RISK: Excel files saved locally; not accessible from other nodes or after cluster termination
   - "\\.to_excel\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
 
-  # Pandas DataFrame to_json without full path
-  # Matches: df.to_json("output.json"), etc.
+  # ========================================
+  # PATTERN 6: Pandas DataFrame to_json
+  # ========================================
+  # WHAT: Detects pandas DataFrame.to_json() saving to relative path
+  # WHY: JSON export to local filesystem
+  # MATCHES: df.to_json("output.json"), data.to_json('results.json')
+  # REGEX EXPLAINED:
+  #   \\.to_json\\s*\\(         - .to_json method call
+  #   \\s*[\"'][^/][^\"']*[\"'] - relative filename argument
+  # RISK: JSON data saved locally instead of durable storage
   - "\\.to_json\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
 
-  # Pandas DataFrame to_pickle without full path
-  # Matches: df.to_pickle("data.pkl"), etc.
+  # ========================================
+  # PATTERN 7: Pandas DataFrame to_pickle
+  # ========================================
+  # WHAT: Detects pandas DataFrame.to_pickle() saving to relative path
+  # WHY: Python pickle export to local filesystem
+  # MATCHES: df.to_pickle("data.pkl"), model.to_pickle('trained.pkl')
+  # REGEX EXPLAINED:
+  #   \\.to_pickle\\s*\\(       - .to_pickle method call
+  #   \\s*[\"'][^/][^\"']*[\"'] - relative filename argument
+  # RISK: Pickle files on local disk; security risk if pickles contain untrusted data
   - "\\.to_pickle\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
 
-  # Pandas DataFrame to_html without full path
-  # Matches: df.to_html("report.html"), etc.
+  # ========================================
+  # PATTERN 8: Pandas DataFrame to_html
+  # ========================================
+  # WHAT: Detects pandas DataFrame.to_html() saving to relative path
+  # WHY: HTML table export to local filesystem
+  # MATCHES: df.to_html("report.html"), summary.to_html('table.html')
+  # REGEX EXPLAINED:
+  #   \\.to_html\\s*\\(         - .to_html method call
+  #   \\s*[\"'][^/][^\"']*[\"'] - relative filename argument
+  # RISK: HTML files saved locally; should use DBFS for persistence
   - "\\.to_html\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
 
-  # Path.cwd() usage - explicit current directory references
-  # Matches: Path.cwd() / "file.txt", Path.cwd().joinpath("data.csv"), etc.
+  # ========================================
+  # PATTERN 9: Path.cwd() - Current directory reference
+  # ========================================
+  # WHAT: Detects explicit reference to current working directory using pathlib
+  # WHY: Path.cwd() returns current directory, often used for file operations
+  # MATCHES: Path.cwd() / "file.txt", Path.cwd().joinpath("data.csv")
+  # REGEX EXPLAINED:
+  #   Path\\.cwd\\s*\\(\\s*\\) - Path.cwd() function call
+  # RISK: Explicit CWD usage; indicates intentional use of local storage
+  # NOTE: This is informational - may be legitimate for temp files
   - "Path\\.cwd\\s*\\(\\s*\\)"
 
-  # os.getcwd() usage - explicit current directory references
-  # Matches: os.getcwd(), os.path.join(os.getcwd(), "file"), etc.
+  # ========================================
+  # PATTERN 10: os.getcwd() - Current directory reference
+  # ========================================
+  # WHAT: Detects explicit reference to current working directory using os module
+  # WHY: os.getcwd() returns current directory string
+  # MATCHES: os.getcwd(), os.path.join(os.getcwd(), "file.txt")
+  # REGEX EXPLAINED:
+  #   os\\.getcwd\\s*\\(\\s*\\) - os.getcwd() function call
+  # RISK: Explicit CWD usage; may indicate local file operations
+  # NOTE: This is informational - review context to determine if problematic
   - "os\\.getcwd\\s*\\(\\s*\\)"
 
-  # pathlib Path write_text without full path
-  # Matches: Path("file.txt").write_text("content"), etc.
+  # ========================================
+  # PATTERN 11: pathlib Path.write_text()
+  # ========================================
+  # WHAT: Detects pathlib Path.write_text() with relative path
+  # WHY: Convenient method to write string data to file
+  # MATCHES: Path("file.txt").write_text("content"), Path('log.txt').write_text(data)
+  # REGEX EXPLAINED:
+  #   Path\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*\\) - Path constructor with relative path
+  #   \\.write_text                                - .write_text method
+  # RISK: Text data written to local filesystem instead of DBFS
   - "Path\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*\\)\\.write_text"
 
-  # pathlib Path write_bytes without full path
-  # Matches: Path("data.bin").write_bytes(data), etc.
+  # ========================================
+  # PATTERN 12: pathlib Path.write_bytes()
+  # ========================================
+  # WHAT: Detects pathlib Path.write_bytes() with relative path
+  # WHY: Method to write binary data to file
+  # MATCHES: Path("data.bin").write_bytes(binary_data), Path('image.png').write_bytes(img)
+  # REGEX EXPLAINED:
+  #   Path\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*\\) - Path constructor with relative path
+  #   \\.write_bytes                               - .write_bytes method
+  # RISK: Binary data (images, models, etc.) saved locally; can be large files
   - "Path\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*\\)\\.write_bytes"
 
-  # File paths starting with ./ (explicit current directory)
-  # Matches: "./output.txt", './data.csv', etc.
+  # ========================================
+  # PATTERN 13: Explicit ./ relative paths
+  # ========================================
+  # WHAT: Detects explicit current directory notation with ./
+  # WHY: ./file.txt explicitly means "current directory"
+  # MATCHES: "./output.txt", './data.csv', "./logs/app.log"
+  # REGEX EXPLAINED:
+  #   [\"']\\.\/[^\"']+[\"'] - Quote, dot-slash, filename, closing quote
+  # RISK: Very explicit CWD usage; definitely writing to local filesystem
+  # NOTE: High confidence indicator of local file operations
   - "[\"']\\.\/[^\"']+[\"']"
 
-  # numpy save operations without full path
-  # Matches: np.save("array.npy", data), np.savetxt("data.txt", arr), etc.
+  # ========================================
+  # PATTERN 14-16: NumPy array save operations
+  # ========================================
+  # WHAT: Detects numpy array save operations to relative paths
+  # WHY: NumPy provides multiple methods to save arrays to disk
+  # MATCHES:
+  #   - np.save("array.npy", data)      - Single array in binary format
+  #   - np.savetxt("data.txt", arr)     - Array as text file
+  #   - np.savez("arrays.npz", a, b)    - Multiple arrays compressed
+  # REGEX EXPLAINED:
+  #   np\\.save(txt|z)?\\s*\\(          - np.save/savetxt/savez function
+  #   \\s*[\"'][^/][^\"']*[\"']          - relative filename argument
+  # RISK: Large array files on local disk; ML/data science outputs not persisted to DBFS
   - "np\\.save\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
   - "np\\.savetxt\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
   - "np\\.savez\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
 
-  # JSON dump to file without full path
-  # Matches: json.dump(data, open("file.json", "w")), etc.
+  # ========================================
+  # PATTERN 17: JSON dump to file
+  # ========================================
+  # WHAT: Detects json.dump() writing to relative path file handle
+  # WHY: Common pattern for saving JSON data
+  # MATCHES: json.dump(data, open("file.json", "w")), json.dump(cfg, open('config.json', 'w'))
+  # REGEX EXPLAINED:
+  #   json\\.dump\\s*\\(                 - json.dump function
+  #   [^,]+,                             - first argument (data object)
+  #   \\s*open\\s*\\(\\s*[\"'][^/]       - open() call with relative path
+  # RISK: JSON configuration or data files saved locally
   - "json\\.dump\\s*\\([^,]+,\\s*open\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*,"
 
-  # pickle dump to file without full path
-  # Matches: pickle.dump(obj, open("data.pkl", "wb")), etc.
+  # ========================================
+  # PATTERN 18: Pickle dump to file
+  # ========================================
+  # WHAT: Detects pickle.dump() writing to relative path file handle
+  # WHY: Python object serialization to file
+  # MATCHES: pickle.dump(obj, open("data.pkl", "wb")), pickle.dump(model, open('model.pkl', 'wb'))
+  # REGEX EXPLAINED:
+  #   pickle\\.dump\\s*\\(               - pickle.dump function
+  #   [^,]+,                             - first argument (object to pickle)
+  #   \\s*open\\s*\\(\\s*[\"'][^/]       - open() call with relative path
+  # RISK: Serialized objects on local disk; ML models not persisted to DBFS
+  # SECURITY: Pickle files can execute arbitrary code when loaded - review carefully
   - "pickle\\.dump\\s*\\([^,]+,\\s*open\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*,"
 
-  # shutil copy operations to current directory (no destination path)
-  # Matches: shutil.copy(src, "file.txt"), shutil.copyfile(src, "output.dat"), etc.
+  # ========================================
+  # PATTERN 19: shutil copy operations
+  # ========================================
+  # WHAT: Detects shutil file copy operations to relative paths
+  # WHY: shutil.copy/copy2/copyfile copy files to destination
+  # MATCHES: shutil.copy(src, "dest.txt"), shutil.copyfile(orig, "output.dat")
+  # REGEX EXPLAINED:
+  #   shutil\\.copy\\w*\\s*\\(           - shutil.copy, copy2, or copyfile
+  #   [^,]+,                             - source file argument
+  #   \\s*[\"'][^/][^\"']*[\"']          - destination relative path
+  # RISK: Files being copied to local filesystem instead of DBFS
   - "shutil\\.copy\\w*\\s*\\([^,]+,\\s*[\"'][^/][^\"']*[\"']"
 
-  # with open statement for files in current directory
-  # Matches: with open("file.txt", "w") as f:, etc.
+  # ========================================
+  # PATTERN 20: with open context manager
+  # ========================================
+  # WHAT: Detects 'with open()' statement for writing to relative paths
+  # WHY: Python best practice for file I/O uses context manager
+  # MATCHES: with open("file.txt", "w") as f:, with open('data.csv', 'wb') as outfile:
+  # REGEX EXPLAINED:
+  #   with\\s+open\\s*\\(                - 'with open(' keywords
+  #   \\s*[\"'][^/][^\"']*[\"']          - relative filename
+  #   \\s*,\\s*[\"'][wa][bt]?[\"']       - write/append mode
+  # RISK: Context manager pattern for local file writes; very common in production code
   - "with\\s+open\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*,\\s*[\"'][wa][bt]?[\"']"
 
-  # CSV writer to file without full path
-  # Matches: csv.writer(open("data.csv", "w")), etc.
+  # ========================================
+  # PATTERN 21: CSV writer
+  # ========================================
+  # WHAT: Detects csv.writer() creating writer for relative path file
+  # WHY: CSV module writer for streaming CSV data
+  # MATCHES: csv.writer(open("data.csv", "w")), csv.writer(open('output.csv', 'w'))
+  # REGEX EXPLAINED:
+  #   csv\\.writer\\s*\\(                - csv.writer function
+  #   \\s*open\\s*\\(\\s*[\"'][^/]       - open() with relative path
+  # RISK: CSV data being written locally; use Spark or pandas with DBFS paths instead
   - "csv\\.writer\\s*\\(\\s*open\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*,"
 
-  # YAML/JSON file writes without full path
+  # ========================================
+  # PATTERN 22: YAML dump to file
+  # ========================================
+  # WHAT: Detects yaml.dump() writing to relative path file handle
+  # WHY: YAML configuration file writing
+  # MATCHES: yaml.dump(config, open("config.yaml", "w"))
+  # REGEX EXPLAINED:
+  #   yaml\\.dump\\s*\\(                 - yaml.dump function
+  #   [^,]+,                             - YAML data object
+  #   \\s*open\\s*\\(\\s*[\"'][^/]       - open() with relative path
+  # RISK: Configuration files saved locally; not accessible after cluster termination
   - "yaml\\.dump\\s*\\([^,]+,\\s*open\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*,"
 
-  # dbutils.fs.put operations with relative paths (Databricks specific)
-  # Matches: dbutils.fs.put("file:/file.txt", ...), etc.
+  # ========================================
+  # PATTERN 23: dbutils.fs.put with file:/ scheme
+  # ========================================
+  # WHAT: Detects dbutils.fs.put() with file:/ URI scheme (local filesystem)
+  # WHY: dbutils.fs.put can write to local driver node using file:/ scheme
+  # MATCHES: dbutils.fs.put("file:/tmp/output.txt", content)
+  # REGEX EXPLAINED:
+  #   dbutils\\.fs\\.put\\s*\\(          - dbutils.fs.put function
+  #   \\s*[\"']file:[^/]                 - file:/ scheme with relative path
+  # RISK: DATABRICKS SPECIFIC - using file:/ scheme writes to driver node local storage
+  # NOTE: Should use Unity Catalog Volumes instead:
+  #       - /Volumes/catalog/schema/volume/path (recommended)
+  #       - cloud:// paths (s3://, abfss://, gs://) for direct cloud access
+  #       - AVOID: dbfs:/ scheme is deprecated
   - "dbutils\\.fs\\.put\\s*\\(\\s*[\"']file:[^/][^\"']*[\"']"
+
+# ============================================================================
+# PATTERN SUMMARY AND RISK LEVELS
+# ============================================================================
+#
+# TOTAL PATTERNS: 23
+#
+# PATTERN CATEGORIES:
+#   1-2:   Basic file open operations (open, Path)
+#   3-8:   Pandas DataFrame exports (CSV, Parquet, Excel, JSON, Pickle, HTML)
+#   9-10:  Explicit CWD references (Path.cwd, os.getcwd)
+#   11-12: pathlib write methods (write_text, write_bytes)
+#   13:    Explicit relative paths (./)
+#   14-16: NumPy array saves (save, savetxt, savez)
+#   17-18: Serialization (json.dump, pickle.dump)
+#   19:    File copying (shutil)
+#   20-22: Structured data writes (with open, csv.writer, yaml.dump)
+#   23:    Databricks specific (dbutils.fs.put with file:/)
+#
+# WHY THIS MATTERS IN DATABRICKS:
+#
+#   1. EPHEMERAL STORAGE: Driver/worker nodes use local ephemeral storage that
+#      is lost when cluster terminates. Files saved to CWD are not persisted.
+#
+#   2. LIMITED DISK SPACE: Local disk space is limited. Large files can fill
+#      up disk and cause cluster failures.
+#
+#   3. NOT DISTRIBUTED: Files on local filesystem are not accessible from
+#      other nodes in the cluster or after cluster restart.
+#
+#   4. NO GOVERNANCE: Local files bypass Unity Catalog governance, auditing,
+#      and access controls.
+#
+#   5. BEST PRACTICE VIOLATION: Databricks current best practices (2026):
+#
+#      PRIMARY (Recommended):
+#      - Unity Catalog Volumes: /Volumes/catalog/schema/volume/path
+#      - Unity Catalog Managed Tables (for structured data)
+#      - Unity Catalog External Locations (for existing cloud storage)
+#
+#      SECONDARY (Legacy/Special Cases):
+#      - Workspace Files: /Workspace/path (small files, dev/test only)
+#      - Direct Cloud Storage: s3://..., abfss://..., gs://...
+#
+#      DEPRECATED (Do Not Use):
+#      - DBFS root: /dbfs/... (deprecated, new accounts don't have access)
+#      - DBFS mounts: /mnt/... (deprecated, bypasses Unity Catalog)
+#      - dbfs:/ paths (deprecated)
+#
+# RECOMMENDED ALTERNATIVES (2026):
+#
+#   Instead of:              Use (Unity Catalog):
+#   -----------              --------------------
+#   open("file.csv", "w")    → open("/Volumes/catalog/schema/volume/file.csv", "w")
+#   df.to_csv("out.csv")     → df.write.format("csv").save("/Volumes/catalog/schema/volume/")
+#   df.to_parquet("data")    → df.write.format("delta").saveAsTable("catalog.schema.table")
+#   np.save("arr.npy")       → with open("/Volumes/catalog/schema/volume/arr.npy", "wb") as f: np.save(f, arr)
+#   Path("file").write_text  → Path("/Volumes/catalog/schema/volume/file").write_text(text)
+#
+#   For Spark DataFrames (structured data):
+#   df.to_csv("out.csv")     → df.write.format("delta").saveAsTable("catalog.schema.table")
+#   df.to_parquet("data")    → df.write.format("delta").saveAsTable("catalog.schema.table")
+#
+#   Unity Catalog Volume Types:
+#   - Managed Volumes: Databricks manages storage (recommended for most cases)
+#   - External Volumes: Govern existing cloud storage locations
+#
+# WHEN LOCAL FILES ARE OK:
+#
+#   - Temporary files within single job execution
+#   - Small config files for job parameters
+#   - Logging to stdout/stderr (captured by Databricks)
+#   - Files explicitly in /tmp/ that are cleaned up
+#   - Files that will be immediately uploaded to cloud storage
+#
+# HOW TO USE THESE RESULTS:
+#
+#   1. Review each match to understand the context
+#   2. Determine if the file write is intentional/temporary or problematic
+#   3. For problematic cases, refactor to use Unity Catalog Volumes
+#   4. For legitimate temp files, consider adding explicit /tmp/ path
+#   5. Document why local files are used if they're intentional
+#
+# MIGRATION GUIDE:
+#
+#   Step 1: Create Unity Catalog Volume
+#     SQL: CREATE VOLUME IF NOT EXISTS catalog.schema.volume_name;
+#
+#   Step 2: Update file paths in code
+#     Before: open("output.csv", "w")
+#     After:  open("/Volumes/catalog/schema/volume/output.csv", "w")
+#
+#   Step 3: Test file operations
+#     - Verify read/write permissions
+#     - Check that files persist after cluster restart
+#     - Confirm Unity Catalog governance applies
+#
+#   Step 4: Update documentation and team knowledge
+#
+# REFERENCES (Official Databricks Documentation):
+#
+#   - Unity Catalog Volumes Overview:
+#     https://docs.databricks.com/aws/en/volumes/
+#     https://learn.microsoft.com/en-us/azure/databricks/volumes/
+#
+#   - Best Practices for DBFS and Unity Catalog:
+#     https://docs.databricks.com/aws/en/dbfs/unity-catalog
+#     https://learn.microsoft.com/en-us/azure/databricks/dbfs/unity-catalog
+#
+#   - Unity Catalog Best Practices:
+#     https://docs.databricks.com/aws/en/data-governance/unity-catalog/best-practices
+#
+#   - Work with Files on Databricks:
+#     https://docs.databricks.com/aws/en/files/
+#     https://learn.microsoft.com/en-us/azure/databricks/files/
+#
+#   - What is DBFS (includes deprecation notice):
+#     https://docs.databricks.com/aws/en/dbfs/
+#
+# Last Updated: January 2026
+# ============================================================================

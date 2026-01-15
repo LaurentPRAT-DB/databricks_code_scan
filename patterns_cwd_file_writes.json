@@ -1,7 +1,22 @@
 {
   "_comment": "Pattern Configuration for Databricks Workspace Scanner - JSON Format",
   "_purpose": "Detect Python code that saves files to the current working directory",
-  "_usage": "python scan_databricks_workspace.py --config patterns_cwd_file_writes.json",
+  "_usage_basic": "scan_databricks_workspace.py -p PROFILE --config patterns_cwd_file_writes.json",
+  "_usage_readable_output": [
+    "1. Save to file: --output results.txt",
+    "2. Group by type: --group-by-type",
+    "3. Filter language: --language python",
+    "4. Scan specific path: --path /Users/your.name",
+    "5. Best combo: -p PROFILE --config patterns_cwd_file_writes.json -l python --path /Users/your.name -g -o results.txt"
+  ],
+  "_output_tips": [
+    "Use --output to save for later review",
+    "Use --group-by-type to organize by file type",
+    "Use --language to filter specific languages",
+    "Use --path to scan specific directories",
+    "Pipe through less for pagination",
+    "Search with grep in output file"
+  ],
   "patterns": [
     "open\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*,\\s*[\"'][wa][bt]?[\"']",
     "open\\s*\\(\\s*Path\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*\\)",
