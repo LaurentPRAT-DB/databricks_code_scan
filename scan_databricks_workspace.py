@@ -17,6 +17,7 @@ import os
 import sys
 import re
 import yaml
+import fnmatch
 from typing import List, Dict, Optional, Pattern
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.config import Config
@@ -448,7 +449,66 @@ class DatabricksWorkspaceScanner:
             if self.verbose:
                 print(f"  ✗ Error accessing: {path}", file=sys.stderr)
 
-    def scan_workspace(self, start_path: str = '/') -> List[Dict]:
+    def find_matching_paths(self, pattern: str) -> List[str]:
+        """Find workspace paths matching a wildcard pattern.
+
+        Args:
+            pattern: Path pattern with wildcards (* or ?)
+                     Examples: /Users/*/notebooks, /Users/john.*, /Shared/team*
+
+        Returns:
+            List of matching directory paths
+        """
+        # If no wildcards, return the pattern as-is
+        if '*' not in pattern and '?' not in pattern:
+            return [pattern]
+
+        matching_paths = []
+
+        # Split pattern into parts
+        parts = pattern.split('/')
+
+        def traverse_and_match(current_path: str, remaining_parts: List[str]):
+            """Recursively traverse workspace and match pattern parts."""
+            if not remaining_parts:
+                # All parts matched, add this path
+                matching_paths.append(current_path)
+                return
+
+            current_part = remaining_parts[0]
+            next_parts = remaining_parts[1:]
+
+            # If this part has no wildcards, just append and continue
+            if '*' not in current_part and '?' not in current_part:
+                next_path = f"{current_path}/{current_part}" if current_path else f"/{current_part}"
+                traverse_and_match(next_path, next_parts)
+                return
+
+            # This part has wildcards, list current directory and filter
+            try:
+                objects = self.client.workspace.list(current_path if current_path else '/')
+                for obj in objects:
+                    if obj.object_type == ObjectType.DIRECTORY:
+                        # Get just the name (last part of path)
+                        obj_name = obj.path.split('/')[-1]
+                        # Check if it matches the pattern
+                        if fnmatch.fnmatch(obj_name, current_part):
+                            traverse_and_match(obj.path, next_parts)
+            except Exception as e:
+                if self.verbose:
+                    print(f"  Warning: Could not list {current_path}: {str(e)}", file=sys.stderr)
+
+        # Start traversal from root
+        # Handle leading slash in pattern
+        if parts and parts[0] == '':
+            parts = parts[1:]  # Remove empty string from leading /
+
+        if parts:
+            traverse_and_match('', parts)
+
+        return matching_paths
+
+    def scan_workspace(self, start_path: str = '/', reset_results: bool = True) -> List[Dict]:
         """Scan Databricks workspace recursively for source code files matching language filter.
 
         This is the main entry point for workspace scanning. It recursively traverses
@@ -459,6 +519,9 @@ class DatabricksWorkspaceScanner:
             start_path (str, optional): Starting path for recursive scan in the
                 workspace. Use '/' for entire workspace, or '/Users/username' for
                 specific user directory. Defaults to '/'.
+            reset_results (bool, optional): Whether to clear previous scan results.
+                Set to False when scanning multiple paths with wildcards to accumulate
+                results. Defaults to True.
 
         Returns:
             List[Dict]: List of source file dictionaries, each containing:
@@ -467,7 +530,7 @@ class DatabricksWorkspaceScanner:
                 - language (str): Programming language (e.g., 'PYTHON', 'SQL')
 
         Note:
-            - Clears previous scan results (self.source_files and self.pattern_matches)
+            - By default, clears previous scan results (self.source_files and self.pattern_matches)
             - Continues scanning even if some directories are inaccessible
             - If patterns are configured, downloads and searches each file (slower)
             - Pattern matches are stored in self.pattern_matches
@@ -491,23 +554,32 @@ class DatabricksWorkspaceScanner:
             Scanning Databricks workspace starting from: /Users/john@example.com
             Found 45 source code files
         """
-        print(f"Scanning Databricks workspace starting from: {start_path}")
-        self.source_files = []
-        self.pattern_matches = []
-        if self.verbose:
-            self.scanned_directories = []
-            self.scanned_files = []
-            self.skipped_files = []
+        # Only print starting message and reset if this is a fresh scan
+        if reset_results:
+            print(f"Scanning Databricks workspace starting from: {start_path}")
+            self.source_files = []
+            self.pattern_matches = []
+            if self.verbose:
+                self.scanned_directories = []
+                self.scanned_files = []
+                self.skipped_files = []
+        else:
+            # Appending to existing results
+            if self.verbose:
+                print(f"  Adding path: {start_path}")
 
         self.scan_directory(start_path)
 
-        print(f"\nFound {len(self.source_files)} source code files")
-        if self.patterns:
-            print(f"Found {len(self.pattern_matches)} pattern match(es)")
+        # Only print summary if this is a final scan (reset_results=True)
+        # For wildcard scans, the summary will be printed after all paths are scanned
+        if reset_results:
+            print(f"\nFound {len(self.source_files)} source code files")
+            if self.patterns:
+                print(f"Found {len(self.pattern_matches)} pattern match(es)")
 
-        # Print verbose statistics
-        if self.verbose:
-            self.print_verbose_stats()
+            # Print verbose statistics
+            if self.verbose:
+                self.print_verbose_stats()
 
         return self.source_files
 
@@ -639,15 +711,17 @@ class DatabricksWorkspaceScanner:
                     f.write(f"{directory}\n")
                 f.write("\n\n")
 
-            # Write file list
-            f.write("SOURCE CODE FILES\n")
-            f.write("-" * 80 + "\n\n")
-            for file in sorted(self.source_files, key=lambda x: x['path']):
-                language = file.get('language', 'UNKNOWN')
-                if language != 'UNKNOWN':
-                    f.write(f"{file['path']} [{file['type']}] [{language}]\n")
-                else:
-                    f.write(f"{file['path']} [{file['type']}]\n")
+            # Write file list (only in verbose mode)
+            if self.verbose:
+                f.write("SOURCE CODE FILES\n")
+                f.write("-" * 80 + "\n\n")
+                for file in sorted(self.source_files, key=lambda x: x['path']):
+                    language = file.get('language', 'UNKNOWN')
+                    if language != 'UNKNOWN':
+                        f.write(f"{file['path']} [{file['type']}] [{language}]\n")
+                    else:
+                        f.write(f"{file['path']} [{file['type']}]\n")
+                f.write("\n\n")
 
             # Write skipped files if verbose mode is enabled
             if self.verbose and self.skipped_files:
@@ -824,6 +898,15 @@ Examples:
 
   # Verbose scan with patterns
   %(prog)s -p prod -v --config patterns.yaml -o verbose_scan.txt
+
+  # Wildcard paths - scan all users
+  %(prog)s -p prod --path "/Users/*" --config patterns.yaml -o all_users.txt
+
+  # Wildcard paths - scan specific pattern
+  %(prog)s -p dev --path "/Users/john.*" -l python -o johns_notebooks.txt
+
+  # Wildcard paths - scan team folders
+  %(prog)s -p prod --path "/Shared/team*" --config patterns.yaml -g -o teams_scan.txt
         """
     )
     # Authentication arguments
@@ -845,7 +928,8 @@ Examples:
     parser.add_argument(
         '--path',
         default='/',
-        help='Starting path to scan (default: /)'
+        help='Starting path to scan. Supports wildcards (* and ?) for pattern matching. '
+             'Examples: /Users/*/notebooks, /Shared/team*, /Users/john.doe*  (default: /)'
     )
     parser.add_argument(
         '--output',
@@ -936,8 +1020,39 @@ Examples:
             verbose=args.verbose
         )
 
-        # Scan workspace
-        scanner.scan_workspace(start_path=args.path)
+        # Check if path contains wildcards
+        if '*' in args.path or '?' in args.path:
+            print(f"Expanding wildcard pattern: {args.path}")
+            matching_paths = scanner.find_matching_paths(args.path)
+
+            if not matching_paths:
+                print(f"Warning: No paths match pattern '{args.path}'", file=sys.stderr)
+                return 0
+
+            print(f"Found {len(matching_paths)} matching path(s):")
+            for path in matching_paths:
+                print(f"  - {path}")
+            print()
+
+            # Initialize scan with first path (resets lists)
+            print(f"Scanning Databricks workspace (wildcard pattern: {args.path})")
+            for i, path in enumerate(matching_paths):
+                if scanner.verbose:
+                    print(f"  Scanning path {i+1}/{len(matching_paths)}: {path}")
+                # First path resets, subsequent paths append
+                scanner.scan_workspace(start_path=path, reset_results=(i == 0))
+
+            # Print summary after all paths scanned
+            print(f"\nFound {len(scanner.source_files)} source code files")
+            if scanner.patterns:
+                print(f"Found {len(scanner.pattern_matches)} pattern match(es)")
+
+            # Print verbose statistics
+            if scanner.verbose:
+                scanner.print_verbose_stats()
+        else:
+            # Single path scan (original behavior)
+            scanner.scan_workspace(start_path=args.path)
 
         # Print results
         scanner.print_results(group_by_type=args.group_by_type)
