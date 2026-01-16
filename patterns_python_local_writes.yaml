@@ -36,7 +36,7 @@
 #   - Databricks magic commands (%run, %pip, %sh)
 #   - Already using proper storage paths
 #
-# TOTAL EXCEPTIONS: 17 patterns
+# TOTAL EXCEPTIONS: 19 patterns
 # ==========================================================================
 
 exceptions:
@@ -140,6 +140,18 @@ exceptions:
   # MATCHES: dbutils.notebook.run('./notebook_path', ...), dbutils.notebook.run("relative/path")
   # WHY: This executes another notebook, it's not a file write operation
   - "dbutils\\.notebook\\.run\\s*\\("
+
+  # Exception 18: find_packages() with where parameter - setuptools configuration
+  # MATCHES: find_packages(where='./src'), find_packages(where="./packages")
+  # WHY: This is setuptools/setup.py configuration for package discovery, not file writes
+  # Common in setup.py files to specify package location
+  - "find_packages\\s*\\([^)]*where\\s*=\\s*[\"']\\./[^\"']*[\"']"
+
+  # Exception 19: sys.path.append() with relative paths - Python path manipulation
+  # MATCHES: sys.path.append('./src'), sys.path.insert(0, './lib')
+  # WHY: This modifies Python's module search path, not file writes
+  # Common in setup.py and scripts to add local package directories
+  - "sys\\.path\\.(?:append|insert)\\s*\\("
 
 
 patterns:
@@ -492,8 +504,12 @@ patterns:
 # 13. Databricks %run magic commands
 # 14. Databricks %pip install commands
 # 15. Databricks %sh read commands (cat, echo, etc.)
+# 16. Read operations (pandas read_*, numpy load*, etc.)
+# 17. dbutils.notebook.run() - notebook execution
+# 18. find_packages(where='./') - setuptools configuration
+# 19. sys.path.append('./') - Python path manipulation
 #
-# TOTAL: 15 exception patterns to filter false positives
+# TOTAL: 19 exception patterns to filter false positives
 #
 # ============================================================================
 # RISK LEVELS EXPLAINED
@@ -625,6 +641,8 @@ patterns:
 #   3. Test code that writes to /tmp
 #   4. Deliberately temporary files within a job
 #   5. Files immediately uploaded to cloud storage
+#   6. setup.py configuration (find_packages, package_dir, etc.)
+#   7. sys.path.append('./src') - Python path manipulation
 #
 # Review each match to determine if it's a true issue.
 #
@@ -652,6 +670,18 @@ patterns:
 #
 # These patterns are typically found in notebooks and are legitimate
 # Databricks operations that happen to use relative path syntax.
+#
+# 4. find_packages(where='./src')
+#    - Python setuptools configuration in setup.py files
+#    - Specifies where to discover Python packages
+#    - Not a file write operation, just package discovery
+#    - Example: packages=find_packages(where='./src')
+#
+# 5. sys.path.append('./src')
+#    - Python path manipulation to add module search paths
+#    - Common in setup.py and scripts to import local packages
+#    - Not a file write operation, just runtime configuration
+#    - Example: sys.path.append('./src')
 #
 # If you see these in your scan results despite the exceptions:
 #   - Check if the pattern is slightly different
