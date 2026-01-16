@@ -63,7 +63,7 @@ patterns:
 
 ## Built-in Exceptions
 
-The `patterns_python_local_writes` configuration includes 15 built-in exception categories:
+The `patterns_python_local_writes` configuration includes 16 built-in exception categories:
 
 ### 1. Unity Catalog Volumes (✅ CORRECT Usage)
 
@@ -274,6 +274,37 @@ assert filename.endswith("data.parquet")     # SKIPPED
 ```
 
 **Why Skip**: String comparisons in assertions are test code, not file operations.
+
+### 16. Read Operations (📖 Data Reading)
+
+```python
+# Patterns:
+# - read_(?:csv|parquet|json|excel|...)\\s*\\(
+# - np\\.(?:load|loadtxt|genfromtxt)\\s*\\(
+# - open\\s*\\([^)]*["']r[bt]?["']
+# - (?:json|pickle|yaml)\\.(?:load|safe_load)\\s*\\(
+
+# Pandas read operations
+df = pd.read_csv('./input.csv')                    # SKIPPED
+data = pd.read_parquet('./data.parquet')           # SKIPPED
+config = pd.read_json('./config.json')             # SKIPPED
+
+# NumPy read operations
+array = np.load('./array.npy')                     # SKIPPED
+data = np.loadtxt('./data.txt')                    # SKIPPED
+
+# File read operations
+with open('./file.txt', 'r') as f:                 # SKIPPED
+    content = f.read()
+
+# Serialization read operations
+with open('./data.json', 'r') as f:                # SKIPPED
+    data = json.load(f)
+
+config = yaml.safe_load(open('./config.yaml'))     # SKIPPED
+```
+
+**Why Skip**: These are READ operations, not WRITE operations. The scanner detects local file writes, so read operations should not be flagged.
 
 ## Custom Exceptions
 

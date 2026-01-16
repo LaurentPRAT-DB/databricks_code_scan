@@ -112,7 +112,7 @@ For each line in file:
   4. Report only problematic patterns
 ```
 
-### Built-in Exceptions (15 Categories)
+### Built-in Exceptions (16 Categories)
 
 | Exception Type | Example | Why Skip |
 |----------------|---------|----------|
@@ -131,6 +131,7 @@ For each line in file:
 | **Windows Absolute** | `C:\data\file.csv` | ✅ Absolute path |
 | **Assertions** | `assert result == "file.csv"` | 🧪 Test assertions |
 | **Format Strings** | `"{path}/file.csv".format(...)` | 🔧 May be absolute at runtime |
+| **Read Operations** | `read_csv('./file.csv')`, `np.load('./data.npy')` | 📖 Read operations, not writes |
 
 ### Benefits
 
@@ -976,7 +977,7 @@ databricks_code_scan/
 ```
 
 **New Files (✨):**
-- **patterns_python_local_writes.yaml**: 50+ Python patterns with 15 built-in exception patterns
+- **patterns_python_local_writes.yaml**: 50+ Python patterns with 16 built-in exception patterns
 - **EXCEPTION_PATTERNS_GUIDE.md**: Complete guide to exception pattern system
 - **PYTHON_LOCAL_WRITES_GUIDE.md**: Guide for detecting Python local file writes
 - **test_exceptions_example.py**: Demonstration file for testing exception behavior
@@ -1133,7 +1134,7 @@ uv run scan_databricks_workspace.py -p prod \
 **New Features Highlighted (✨):**
 - **Exception Patterns**: Automatically filter false positives (Unity Catalog, cloud storage, comments)
 - **Verbose Mode**: Track all scanned directories, matched files, and skipped files
-- **Python-Specific Patterns**: 50+ patterns with 15 built-in exceptions for Python file operations
+- **Python-Specific Patterns**: 50+ patterns with 16 built-in exceptions for Python file operations
 
 ---
 

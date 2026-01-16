@@ -36,7 +36,7 @@
 #   - Databricks magic commands (%run, %pip, %sh)
 #   - Already using proper storage paths
 #
-# TOTAL EXCEPTIONS: 15 patterns
+# TOTAL EXCEPTIONS: 16 patterns
 # ==========================================================================
 
 exceptions:
@@ -126,6 +126,15 @@ exceptions:
   # WHY: These are read operations or output, not writing files
   - "#\\s*MAGIC\\s+%sh"
   - "^\\s*%sh"
+
+  # Exception 16: Read operations (not write operations)
+  # MATCHES: read_csv('./file.csv'), pd.read_parquet('./data.parquet'), np.load('./array.npy')
+  # WHY: These are READ operations, not WRITE operations - should not be flagged
+  # Covers: pandas read_*, numpy load*, open() with 'r' mode, json/pickle/yaml load
+  - "read_(?:csv|parquet|json|excel|table|pickle|feather|hdf|sql|gbq|html|xml|clipboard|fwf|stata|sas|spss)\\s*\\("
+  - "np\\.(?:load|loadtxt|genfromtxt|fromfile)\\s*\\("
+  - "open\\s*\\([^)]*[\"']r[bt]?[\"']"
+  - "(?:json|pickle|yaml|joblib)\\.(?:load|safe_load)\\s*\\("
 
 
 patterns:
