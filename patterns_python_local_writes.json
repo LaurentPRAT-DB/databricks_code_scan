@@ -35,6 +35,38 @@
     "ml_model": "model.save('/Volumes/catalog/schema/volume/model.h5')"
   },
 
+  "_exception_info": "Exception patterns are checked BEFORE main patterns to skip false positives",
+
+  "exceptions": [
+    "/Volumes/[^\"'\\s]+",
+    "/dbfs/[^\"'\\s]+",
+    "dbfs:/[^\"'\\s]+",
+    "/tmp/[^\"'\\s]+",
+    "/databricks/driver/tmp/[^\"'\\s]+",
+    "s3a?://[^\"'\\s]+",
+    "abfss?://[^\"'\\s]+",
+    "gs://[^\"'\\s]+",
+    "wasbs?://[^\"'\\s]+",
+    "adl://[^\"'\\s]+",
+    "^\\s*#.*(?:to_csv|to_parquet|save|write_text|write_bytes|open\\s*\\()",
+    "\"\"\"[^\"]*(?:to_csv|to_parquet|save|write_text|write_bytes|open\\s*\\()[^\"]*\"\"\"",
+    "'''[^']*(?:to_csv|to_parquet|save|write_text|write_bytes|open\\s*\\()[^']*'''",
+    "^\\s*[a-zA-Z_][a-zA-Z0-9_]*\\s*=\\s*[\"'][^/][^\"']*[\"']\\s*(?:#.*)?$",
+    "/test[^/]*/[^\"'\\s]+",
+    "/tests/[^\"'\\s]+",
+    "\\$\\{[A-Z_]+\\}",
+    "os\\.environ",
+    "getenv\\s*\\(",
+    "f[\"'][^\"']*\\{[^}]+\\}[^\"']*/[^\"']*[\"']",
+    "[\"'][^\"']*\\{[^}]+\\}[^\"']*/[^\"']*[\"'].*\\.format\\s*\\(",
+    "path\\.startswith\\s*\\([\"']/[\"']\\)",
+    "path\\.is_absolute\\s*\\(\\)",
+    "os\\.path\\.isabs\\s*\\(",
+    "/dev/(?:null|stdout|stderr)",
+    "[A-Z]:\\\\[^\"'\\s]+",
+    "assert.*[\"'][^/][^\"']*[\"']"
+  ],
+
   "patterns": [
     "open\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*,\\s*[\"'][wa][bt]?[\"']",
     "open\\s*\\(\\s*Path\\s*\\(\\s*[\"'][^/][^\"']*[\"']\\s*\\)",

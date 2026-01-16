@@ -85,6 +85,152 @@ uv run scan_databricks_workspace.py \
   --output comprehensive_security_scan.txt
 ```
 
+## Exception Patterns (Reduce False Positives) ✨
+
+The `patterns_python_local_writes` configurations include a powerful **exception system** that filters out false positives **before** pattern matching.
+
+### How Exception Patterns Work
+
+1. **Checked First**: Exceptions are evaluated **before** main patterns
+2. **Line-Level Filtering**: If a line matches any exception, skip all pattern checks for that line
+3. **Dramatically Reduces Noise**: Focus on real issues, ignore legitimate usage
+
+### What Gets Skipped (Exceptions)
+
+| Exception Type | Pattern Example | Why It's Skipped |
+|----------------|-----------------|------------------|
+| **Unity Catalog Volumes** | `/Volumes/catalog/schema/volume/file.csv` | ✅ CORRECT persistent storage |
+| **Cloud Storage Paths** | `s3://bucket/data.csv`, `abfss://...` | ✅ Direct cloud access |
+| **System Temp Directory** | `/tmp/processing.csv` | ✅ Legitimate temporary files |
+| **DBFS Paths** | `/dbfs/mnt/data/file.csv`, `dbfs:/...` | 🟡 Deprecated but intentional |
+| **Comments** | `# Example: df.to_csv("file.csv")` | 📝 Documentation, not code |
+| **Docstrings** | `"""Example: model.save("file.h5")"""` | 📝 Code examples |
+| **Variable Assignments** | `filename = "output.csv"` | 🔤 String literal, not file operation |
+| **f-strings with Variables** | `f"{base_path}/file.csv"` | 🔧 May resolve to absolute path |
+| **Environment Variables** | `os.environ.get('PATH')` | 🔧 Configuration-driven paths |
+| **Path Validation** | `path.startswith('/')` | 🔍 Code checking for absolute paths |
+| **Test Paths** | `/tests/test_export.py` | 🧪 Test files often use mock data |
+
+### Exception Configuration
+
+**YAML Format:**
+```yaml
+exceptions:
+  # Unity Catalog Volumes (GOOD - skip)
+  - "/Volumes/[^\"'\\s]+"
+
+  # Cloud storage (GOOD - skip)
+  - "s3a?://[^\"'\\s]+"
+  - "abfss?://[^\"'\\s]+"
+  - "gs://[^\"'\\s]+"
+
+  # System temp directory (OK - skip)
+  - "/tmp/[^\"'\\s]+"
+
+  # Comments (documentation - skip)
+  - "^\\s*#.*(?:to_csv|to_parquet|save)"
+
+  # f-strings with variables (may be absolute - skip)
+  - 'f["\'][^"\']*\\{[^}]+\\}[^"\']*/[^"\']*["\']'
+
+patterns:
+  # ... main patterns here ...
+```
+
+**JSON Format:**
+```json
+{
+  "exceptions": [
+    "/Volumes/[^\"'\\s]+",
+    "s3a?://[^\"'\\s]+",
+    "/tmp/[^\"'\\s]+",
+    "^\\s*#.*(?:to_csv|to_parquet|save)"
+  ],
+  "patterns": [
+    "..."
+  ]
+}
+```
+
+### Example: What Gets Detected vs. Skipped
+
+```python
+# ✅ SKIPPED (Exception: Unity Catalog Volume)
+df.to_csv("/Volumes/catalog/schema/volume/output.csv")
+
+# ✅ SKIPPED (Exception: Cloud storage)
+df.to_csv("s3://my-bucket/data/output.csv")
+
+# ✅ SKIPPED (Exception: System temp)
+df.to_csv("/tmp/temp_file.csv")
+
+# ✅ SKIPPED (Exception: Comment)
+# Example: df.to_csv("output.csv")
+
+# ✅ SKIPPED (Exception: f-string with variable)
+base_path = "/Volumes/catalog/schema/volume"
+df.to_csv(f"{base_path}/output.csv")
+
+# ✅ SKIPPED (Exception: Variable assignment, not operation)
+output_filename = "results.csv"
+
+# 🔴 DETECTED (No exception - problematic!)
+df.to_csv("output.csv")
+
+# 🔴 DETECTED (No exception - problematic!)
+np.save("array.npy", data)
+
+# 🔴 DETECTED (No exception - problematic!)
+model.save("trained_model.h5")
+```
+
+### Testing Exception Patterns
+
+A test file is provided to verify exception behavior:
+
+```bash
+# Test exception patterns with example file
+uv run scan_databricks_workspace.py \
+  --profile dev \
+  --language python \
+  --config patterns_python_local_writes.yaml \
+  --path /path/to/test_exceptions_example.py \
+  --verbose
+```
+
+The test file `test_exceptions_example.py` contains:
+- **15+ good patterns** that should be SKIPPED by exceptions
+- **10+ bad patterns** that should be DETECTED
+- Clear sections showing what's expected
+
+### Custom Exceptions
+
+You can add your own exception patterns:
+
+```yaml
+exceptions:
+  # Standard exceptions
+  - "/Volumes/[^\"'\\s]+"
+  - "/tmp/[^\"'\\s]+"
+
+  # Custom: Your organization's approved paths
+  - "/mnt/approved-storage/[^\"'\\s]+"
+
+  # Custom: Your staging directory
+  - "/staging/[^\"'\\s]+"
+
+  # Custom: Specific function names that are safe
+  - "safe_write_file\\s*\\("
+```
+
+### Benefits of Exception Patterns
+
+1. **Reduced False Positives**: Focus on real issues, not legitimate code
+2. **Faster Triage**: Less manual filtering of scan results
+3. **Better Adoption**: Teams trust the tool when noise is low
+4. **Customizable**: Add organization-specific exceptions
+5. **Performance**: Skip pattern matching for exception lines
+
 ## Pattern Categories
 
 The configuration includes **50+ patterns** organized into 14 categories:

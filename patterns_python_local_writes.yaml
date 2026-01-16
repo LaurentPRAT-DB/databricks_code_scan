@@ -27,6 +27,100 @@
 #
 # ============================================================================
 
+# ==========================================================================
+# EXCEPTION PATTERNS (Checked First - Skip These)
+# ==========================================================================
+# These patterns identify false positives that should be excluded from results.
+# Exceptions are checked BEFORE main patterns to avoid reporting valid code.
+#
+# Common false positives:
+#   - Unity Catalog Volume paths (/Volumes/...)
+#   - DBFS paths (/dbfs/...) - deprecated but intentional
+#   - Absolute paths (/tmp/...)
+#   - Comments and docstrings (code examples)
+#   - Test files with test data
+#   - Already using proper storage paths
+# ==========================================================================
+
+exceptions:
+  # Exception 1: Unity Catalog Volumes (CORRECT usage - skip)
+  # These are GOOD - using proper persistent storage
+  # MATCHES: /Volumes/catalog/schema/volume/file.csv
+  - "/Volumes/[^\"'\\s]+"
+
+  # Exception 2: DBFS paths (deprecated but intentional - skip)
+  # While deprecated, if code explicitly uses DBFS paths, don't flag relative path patterns
+  # MATCHES: /dbfs/mnt/data/file.csv, dbfs:/path/to/file
+  - "/dbfs/[^\"'\\s]+"
+  - "dbfs:/[^\"'\\s]+"
+
+  # Exception 3: System temp directory (legitimate temporary files)
+  # MATCHES: /tmp/file.txt, /tmp/processing/data.csv
+  - "/tmp/[^\"'\\s]+"
+
+  # Exception 4: Databricks driver tmp directory
+  # MATCHES: /databricks/driver/tmp/
+  - "/databricks/driver/tmp/[^\"'\\s]+"
+
+  # Exception 5: Cloud storage paths (direct S3, ADLS, GCS)
+  # MATCHES: s3://bucket/path, s3a://bucket/path, abfss://container@account
+  - "s3a?://[^\"'\\s]+"
+  - "abfss?://[^\"'\\s]+"
+  - "gs://[^\"'\\s]+"
+  - "wasbs?://[^\"'\\s]+"
+  - "adl://[^\"'\\s]+"
+
+  # Exception 6: Code in comments (single-line comments)
+  # MATCHES: # df.to_csv("output.csv")
+  - "^\\s*#.*(?:to_csv|to_parquet|save|write_text|write_bytes|open\\s*\\()"
+
+  # Exception 7: Code in docstrings (triple quotes)
+  # This is trickier - match lines that look like docstring examples
+  # MATCHES: """Example: df.to_csv("file.csv")"""
+  - '"""[^"]*(?:to_csv|to_parquet|save|write_text|write_bytes|open\\s*\\()[^"]*"""'
+  - "'''[^']*(?:to_csv|to_parquet|save|write_text|write_bytes|open\\s*\\()[^']*'''"
+
+  # Exception 8: String literals in comparisons or assignments (not actual calls)
+  # MATCHES: filename = "output.csv" (but not df.to_csv("output.csv"))
+  # This checks if the pattern appears as a string literal assignment
+  - "^\\s*[a-zA-Z_][a-zA-Z0-9_]*\\s*=\\s*[\"'][^/][^\"']*[\"']\\s*(?:#.*)?$"
+
+  # Exception 9: Test files - paths containing "test"
+  # MATCHES: /Workspace/Users/user/tests/test_export.py
+  # Note: This is line-level, but helps identify test file contexts
+  - "/test[^/]*/[^\"'\\s]+"
+  - "/tests/[^\"'\\s]+"
+
+  # Exception 10: Environment variable references (will be absolute at runtime)
+  # MATCHES: os.environ.get('OUTPUT_PATH'), ${OUTPUT_DIR}/file.csv
+  - "\\$\\{[A-Z_]+\\}"
+  - "os\\.environ"
+  - "getenv\\s*\\("
+
+  # Exception 11: f-strings or format strings with variables (may become absolute)
+  # MATCHES: f"{base_path}/file.csv", "{path}/output.csv".format(...)
+  # Note: Only skip if there's a variable that might contain absolute path
+  - 'f["\'][^"\']*\\{[^}]+\\}[^"\']*/[^"\']*["\']'
+  - '["\'][^"\']*\\{[^}]+\\}[^"\']*/[^"\']*["\'].*\\.format\\s*\\('
+
+  # Exception 12: Already validated paths (common validation patterns)
+  # MATCHES: if path.startswith('/') or path.is_absolute()
+  - "path\\.startswith\\s*\\([\"']/[\"']\\)"
+  - "path\\.is_absolute\\s*\\(\\)"
+  - "os\\.path\\.isabs\\s*\\("
+
+  # Exception 13: Explicit /dev/null or /dev/stdout (Unix special files)
+  # MATCHES: open("/dev/null", "w")
+  - "/dev/(?:null|stdout|stderr)"
+
+  # Exception 14: Windows absolute paths (C:\, D:\)
+  # MATCHES: C:\data\file.csv (less common in Databricks but valid)
+  - "[A-Z]:\\\\[^\"'\\s]+"
+
+  # Exception 15: Mock/test data in assertions
+  # MATCHES: assert result == "output.csv"
+  - "assert.*[\"'][^/][^\"']*[\"']"
+
 patterns:
   # ==========================================================================
   # CATEGORY 1: Basic Python File Operations

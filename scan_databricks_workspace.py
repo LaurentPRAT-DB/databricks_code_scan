@@ -132,13 +132,35 @@ class DatabricksWorkspaceScanner:
 
         # Compile regex patterns
         self.patterns: List[Pattern] = []
+        self.exceptions: List[Pattern] = []  # Exception patterns (checked first)
+
         if patterns:
-            print(f"\nCompiling {len(patterns)} search pattern(s)...")
+            # Patterns is a tuple of (exceptions_list, patterns_list) if exceptions exist
+            # or just patterns_list if no exceptions
+            if isinstance(patterns, tuple) and len(patterns) == 2:
+                exceptions_list, patterns_list = patterns
+
+                # Compile exception patterns
+                if exceptions_list:
+                    print(f"\nCompiling {len(exceptions_list)} exception pattern(s)...")
+                    for pattern_str in exceptions_list:
+                        try:
+                            compiled = re.compile(pattern_str)
+                            self.exceptions.append(compiled)
+                            print(f"  ✓ Exception: {pattern_str[:60]}...")
+                        except re.error as e:
+                            print(f"  ✗ Invalid exception pattern '{pattern_str}': {e}", file=sys.stderr)
+                    print()
+
+                patterns = patterns_list
+
+            # Compile main search patterns
+            print(f"Compiling {len(patterns)} search pattern(s)...")
             for pattern_str in patterns:
                 try:
                     compiled = re.compile(pattern_str)
                     self.patterns.append(compiled)
-                    print(f"  ✓ {pattern_str}")
+                    print(f"  ✓ {pattern_str[:60]}...")
                 except re.error as e:
                     print(f"  ✗ Invalid regex pattern '{pattern_str}': {e}", file=sys.stderr)
             print()
@@ -318,6 +340,19 @@ class DatabricksWorkspaceScanner:
 
         lines = content.split('\n')
         for line_num, line in enumerate(lines, start=1):
+            # Check if this line matches any exception patterns (skip if it does)
+            line_is_exception = False
+            if self.exceptions:
+                for exception_pattern in self.exceptions:
+                    if exception_pattern.search(line):
+                        line_is_exception = True
+                        break
+
+            # If line matches exception, skip pattern matching for this line
+            if line_is_exception:
+                continue
+
+            # Apply main patterns to non-exception lines
             for pattern in self.patterns:
                 for match in pattern.finditer(line):
                     matches.append({
@@ -656,12 +691,13 @@ class DatabricksWorkspaceScanner:
         print(f"Results exported to: {output_file}")
 
 
-def load_patterns_from_config(config_file: str) -> List[str]:
-    """Load regex patterns from a YAML or JSON configuration file.
+def load_patterns_from_config(config_file: str):
+    """Load regex patterns and exceptions from a YAML or JSON configuration file.
 
     This function supports both YAML and JSON formats and can handle files with
     .example extensions. The configuration file must contain a root-level
-    'patterns' key with a list of regex pattern strings.
+    'patterns' key with a list of regex pattern strings. Optionally, it can
+    contain an 'exceptions' key with patterns to exclude from results.
 
     Args:
         config_file (str): Path to the configuration file. Supported extensions:
@@ -670,8 +706,8 @@ def load_patterns_from_config(config_file: str) -> List[str]:
             - .yaml.example, .json.example (example files)
 
     Returns:
-        List[str]: List of regex pattern strings to be compiled and used for
-            content searching.
+        tuple or List[str]: If exceptions exist, returns (exceptions_list, patterns_list).
+            Otherwise, returns just patterns_list for backward compatibility.
 
     Raises:
         SystemExit: Exits with code 1 if file cannot be read, parsed, or does
@@ -681,21 +717,29 @@ def load_patterns_from_config(config_file: str) -> List[str]:
         - The .example suffix is stripped when determining file type
         - Configuration must be a dictionary with a 'patterns' key
         - The 'patterns' value must be a list of strings
+        - The 'exceptions' key is optional and contains patterns to skip
         - Comments starting with _ (e.g., _comment, _usage) are ignored
         - Invalid patterns are not validated here - validation happens during compilation
 
     Example:
-        YAML format (patterns.yaml):
+        YAML format with exceptions (patterns.yaml):
         ```yaml
+        exceptions:
+          - "/Volumes/[^\"'\\s]+"
+          - "^\\s*#.*"
         patterns:
           - "password\\s*=\\s*['\"].*['\"]"
           - "api_key"
           - "TODO:"
         ```
 
-        JSON format (patterns.json):
+        JSON format with exceptions (patterns.json):
         ```json
         {
+          "exceptions": [
+            "/Volumes/[^\"'\\\\s]+",
+            "^\\\\s*#.*"
+          ],
           "patterns": [
             "password\\\\s*=\\\\s*['\\\"].*['\\\"]",
             "api_key",
@@ -706,10 +750,14 @@ def load_patterns_from_config(config_file: str) -> List[str]:
 
         Usage:
         >>> patterns = load_patterns_from_config("security_patterns.yaml")
+        >>> if isinstance(patterns, tuple):
+        ...     exceptions, patterns = patterns
         >>> print(len(patterns))
         15
     """
     patterns = []
+    exceptions = []
+
     try:
         # Strip .example suffix if present for type detection
         file_type = config_file.replace('.example', '')
@@ -725,10 +773,19 @@ def load_patterns_from_config(config_file: str) -> List[str]:
             if not isinstance(config, dict):
                 raise ValueError("Config file must contain a dictionary")
 
+            # Load exception patterns (optional)
+            if 'exceptions' in config:
+                exceptions = config['exceptions']
+                if not isinstance(exceptions, list):
+                    raise ValueError("'exceptions' must be a list")
+                print(f"Loaded {len(exceptions)} exception pattern(s) from config")
+
+            # Load main patterns (required)
             if 'patterns' in config:
                 patterns = config['patterns']
                 if not isinstance(patterns, list):
                     raise ValueError("'patterns' must be a list")
+                print(f"Loaded {len(patterns)} pattern(s) from config")
             else:
                 raise ValueError("Config file must contain a 'patterns' key")
 
@@ -736,7 +793,11 @@ def load_patterns_from_config(config_file: str) -> List[str]:
         print(f"Error loading config file {config_file}: {str(e)}", file=sys.stderr)
         sys.exit(1)
 
-    return patterns
+    # Return tuple if exceptions exist, otherwise just patterns for backward compatibility
+    if exceptions:
+        return (exceptions, patterns)
+    else:
+        return patterns
 
 
 def main():
