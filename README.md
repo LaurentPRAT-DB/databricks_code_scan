@@ -25,7 +25,7 @@ This tool addresses critical security and compliance needs for Databricks enviro
 - **Pattern Matching Engine**: Regex-based content scanning for security patterns
 - **Exception Patterns System** ✨: Filter false positives automatically by checking exception patterns FIRST (reduces noise by 60-80%)
 - **Multi-language Support**: Scan Python, SQL, Scala, R, Java, JavaScript, and 10+ other languages
-- **Configuration-driven**: Define security patterns and exceptions in YAML/JSON for reusability
+- **Configuration-driven**: Define security patterns and exceptions in YAML for reusability
 - **Detailed Reporting**: Line-by-line matches with context and pattern information
 
 ### Workspace Analysis
@@ -352,7 +352,7 @@ Language Filtering:
 
 Pattern Matching:
   --pattern REGEX          Regex pattern to search (can repeat)
-  --config/-c FILE         Config file with patterns (YAML/JSON)
+  --config/-c FILE         YAML config file with patterns
 ```
 
 ### Basic Examples
@@ -659,15 +659,14 @@ uv run scan_databricks_workspace.py \
 
 ## Pattern Configuration Files
 
-The repository includes example pattern configurations:
+The repository includes example pattern configurations in YAML format:
 
 | File | Purpose | Use Case |
 |------|---------|----------|
 | `patterns.yaml.example` | General purpose patterns | Code quality, TODO comments |
-| `patterns.json.example` | JSON format example | Same as YAML, different format |
 | `security_patterns.yaml.example` | Security-focused patterns | Credentials, API keys, secrets |
 | `patterns_cwd_file_writes.yaml` | Local file write detection | Unity Catalog migration, DBFS deprecation |
-| `patterns_cwd_file_writes.json` | JSON version of above | Same patterns, JSON format |
+| `patterns_python_local_writes.yaml` | Python-specific with exceptions | Detects local file writes, skips false positives |
 
 ### Using Example Configurations
 
@@ -968,19 +967,16 @@ databricks_code_scan/
 │   ├── .env.example                    # Environment variable template
 │   ├── .gitignore                      # Git ignore patterns
 │   ├── patterns.yaml.example           # General pattern examples
-│   ├── patterns.json.example           # JSON format pattern examples
 │   ├── security_patterns.yaml.example  # Security-focused patterns
-│   ├── patterns_cwd_file_writes.yaml   # Local file write detection (YAML)
-│   ├── patterns_cwd_file_writes.json   # Local file write detection (JSON)
-│   ├── patterns_python_local_writes.yaml  # Python-specific with exceptions ✨
-│   └── patterns_python_local_writes.json  # Python-specific with exceptions (JSON) ✨
+│   ├── patterns_cwd_file_writes.yaml   # Local file write detection
+│   └── patterns_python_local_writes.yaml  # Python-specific with exceptions ✨
 │
 └── Test Files/
     └── test_exceptions_example.py      # Test file demonstrating exception patterns ✨
 ```
 
 **New Files (✨):**
-- **patterns_python_local_writes.yaml/json**: 50+ Python patterns with 15 built-in exception patterns
+- **patterns_python_local_writes.yaml**: 50+ Python patterns with 15 built-in exception patterns
 - **EXCEPTION_PATTERNS_GUIDE.md**: Complete guide to exception pattern system
 - **PYTHON_LOCAL_WRITES_GUIDE.md**: Guide for detecting Python local file writes
 - **test_exceptions_example.py**: Demonstration file for testing exception behavior

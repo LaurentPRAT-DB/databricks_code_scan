@@ -35,14 +35,6 @@ patterns_python_local_writes.yaml
 - Includes pattern explanations and risk levels
 - Contains migration guide and examples
 
-### JSON Format
-```bash
-patterns_python_local_writes.json
-```
-- Machine-readable format
-- Same patterns as YAML version
-- Useful for programmatic processing
-
 ## Quick Start
 
 ### 1. Basic Scan
@@ -135,21 +127,6 @@ exceptions:
 
 patterns:
   # ... main patterns here ...
-```
-
-**JSON Format:**
-```json
-{
-  "exceptions": [
-    "/Volumes/[^\"'\\s]+",
-    "s3a?://[^\"'\\s]+",
-    "/tmp/[^\"'\\s]+",
-    "^\\s*#.*(?:to_csv|to_parquet|save)"
-  ],
-  "patterns": [
-    "..."
-  ]
-}
 ```
 
 ### Example: What Gets Detected vs. Skipped

@@ -16,7 +16,6 @@ including notebooks (.py, .sql, .scala, .r) and regular files.
 import os
 import sys
 import re
-import json
 import yaml
 from typing import List, Dict, Optional, Pattern
 from databricks.sdk import WorkspaceClient
@@ -692,18 +691,16 @@ class DatabricksWorkspaceScanner:
 
 
 def load_patterns_from_config(config_file: str):
-    """Load regex patterns and exceptions from a YAML or JSON configuration file.
+    """Load regex patterns and exceptions from a YAML configuration file.
 
-    This function supports both YAML and JSON formats and can handle files with
-    .example extensions. The configuration file must contain a root-level
-    'patterns' key with a list of regex pattern strings. Optionally, it can
-    contain an 'exceptions' key with patterns to exclude from results.
+    This function loads pattern configurations from YAML files (.yaml or .yml).
+    The configuration file must contain a root-level 'patterns' key with a list
+    of regex pattern strings. Optionally, it can contain an 'exceptions' key
+    with patterns to exclude from results.
 
     Args:
-        config_file (str): Path to the configuration file. Supported extensions:
-            - .yaml, .yml (YAML format)
-            - .json (JSON format)
-            - .yaml.example, .json.example (example files)
+        config_file (str): Path to the YAML configuration file.
+            Supported extensions: .yaml, .yml
 
     Returns:
         tuple or List[str]: If exceptions exist, returns (exceptions_list, patterns_list).
@@ -714,7 +711,7 @@ def load_patterns_from_config(config_file: str):
             not contain valid pattern configuration.
 
     Note:
-        - The .example suffix is stripped when determining file type
+        - Only YAML format is supported (.yaml or .yml files)
         - Configuration must be a dictionary with a 'patterns' key
         - The 'patterns' value must be a list of strings
         - The 'exceptions' key is optional and contains patterns to skip
@@ -733,21 +730,6 @@ def load_patterns_from_config(config_file: str):
           - "TODO:"
         ```
 
-        JSON format with exceptions (patterns.json):
-        ```json
-        {
-          "exceptions": [
-            "/Volumes/[^\"'\\\\s]+",
-            "^\\\\s*#.*"
-          ],
-          "patterns": [
-            "password\\\\s*=\\\\s*['\\\"].*['\\\"]",
-            "api_key",
-            "TODO:"
-          ]
-        }
-        ```
-
         Usage:
         >>> patterns = load_patterns_from_config("security_patterns.yaml")
         >>> if isinstance(patterns, tuple):
@@ -759,16 +741,12 @@ def load_patterns_from_config(config_file: str):
     exceptions = []
 
     try:
-        # Strip .example suffix if present for type detection
-        file_type = config_file.replace('.example', '')
+        # Validate file extension
+        if not config_file.endswith(('.yaml', '.yml')):
+            raise ValueError("Config file must be .yaml or .yml format")
 
         with open(config_file, 'r') as f:
-            if file_type.endswith(('.yaml', '.yml')):
-                config = yaml.safe_load(f)
-            elif file_type.endswith('.json'):
-                config = json.load(f)
-            else:
-                raise ValueError("Config file must be .yaml, .yml, or .json (optionally with .example)")
+            config = yaml.safe_load(f)
 
             if not isinstance(config, dict):
                 raise ValueError("Config file must contain a dictionary")
@@ -906,7 +884,7 @@ Examples:
     parser.add_argument(
         '--config',
         '-c',
-        help='Configuration file (YAML or JSON) containing patterns to search'
+        help='YAML configuration file (.yaml or .yml) containing patterns to search'
     )
 
     args = parser.parse_args()

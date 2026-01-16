@@ -45,7 +45,7 @@ Exception patterns are a powerful feature in the Databricks Workspace Scanner th
 
 ## Configuration Format
 
-### YAML Format
+Pattern configurations use **YAML format** (.yaml or .yml files):
 
 ```yaml
 # Exception patterns checked FIRST (skip these)
@@ -59,23 +59,6 @@ exceptions:
 patterns:
   - "df\\.to_csv\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
   - "np\\.save\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
-```
-
-### JSON Format
-
-```json
-{
-  "exceptions": [
-    "/Volumes/[^\"'\\s]+",
-    "s3://[^\"'\\s]+",
-    "/tmp/[^\"'\\s]+",
-    "^\\s*#.*"
-  ],
-  "patterns": [
-    "df\\.to_csv\\s*\\(\\s*[\"'][^/][^\"']*[\"']",
-    "np\\.save\\s*\\(\\s*[\"'][^/][^\"']*[\"']"
-  ]
-}
 ```
 
 ## Built-in Exceptions

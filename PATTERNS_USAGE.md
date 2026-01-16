@@ -5,10 +5,10 @@ These pattern files help you scan Databricks workspaces for Python code that wri
 
 ## Available Pattern Files
 
-1. **patterns_cwd_file_writes.yaml** - YAML format (recommended for readability)
-2. **patterns_cwd_file_writes.json** - JSON format (alternative)
+All pattern configurations use **YAML format** (.yaml or .yml files):
 
-Both files contain identical patterns in different formats.
+1. **patterns_cwd_file_writes.yaml** - General file write detection patterns
+2. **patterns_python_local_writes.yaml** - Python-specific patterns with exception filtering (recommended)
 
 ## What These Patterns Detect
 
@@ -49,18 +49,11 @@ The pattern files detect various Python file-writing operations that save to the
 
 ## Usage Examples
 
-### Basic Scan with Pattern File (YAML)
+### Basic Scan with Pattern File
 ```bash
 python scan_databricks_workspace.py \
   --profile production \
   --config patterns_cwd_file_writes.yaml
-```
-
-### Basic Scan with Pattern File (JSON)
-```bash
-python scan_databricks_workspace.py \
-  --profile production \
-  --config patterns_cwd_file_writes.json
 ```
 
 ### Scan Specific Path with Output File
@@ -158,7 +151,7 @@ If you use `--output`, results are saved to a text file containing:
 
 ### Adding Your Own Patterns
 
-Edit the YAML file:
+Edit the YAML configuration file:
 ```yaml
 patterns:
   # Your custom pattern
@@ -166,16 +159,12 @@ patterns:
 
   # Example: detect specific function calls
   - 'save_to_disk\s*\([^)]*\)'
-```
 
-Or edit the JSON file:
-```json
-{
-  "patterns": [
-    "your_regex_pattern_here",
-    "save_to_disk\\s*\\([^)]*\\)"
-  ]
-}
+# Optional: add exception patterns to skip false positives
+exceptions:
+  - '/Volumes/[^"''\s]+'     # Unity Catalog Volumes
+  - 's3://[^"''\s]+'         # S3 paths
+  - '^\\s*#.*'               # Comments
 ```
 
 ### Testing Individual Patterns
