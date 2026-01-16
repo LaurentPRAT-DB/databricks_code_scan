@@ -11,12 +11,6 @@
 #     --config patterns_python_local_writes.yaml \
 #     --output python_local_writes_scan.txt
 #
-# WHY THIS MATTERS:
-#   - Files written to CWD are saved to cluster driver node (ephemeral)
-#   - Data is lost when cluster terminates
-#   - Limited disk space can cause cluster failures
-#   - Bypasses Unity Catalog governance and auditing
-#   - Not accessible from other nodes or users
 #
 # RECOMMENDED ALTERNATIVES (2026):
 #   Instead of:              Use Unity Catalog Volumes:
@@ -85,41 +79,29 @@ exceptions:
   # This checks if the pattern appears as a string literal assignment
   - "^\\s*[a-zA-Z_][a-zA-Z0-9_]*\\s*=\\s*[\"'][^/][^\"']*[\"']\\s*(?:#.*)?$"
 
-  # Exception 9: Test files - paths containing "test"
-  # MATCHES: /Workspace/Users/user/tests/test_export.py
-  # Note: This is line-level, but helps identify test file contexts
-  - "/test[^/]*/[^\"'\\s]+"
-  - "/tests/[^\"'\\s]+"
 
-  # Exception 10: Environment variable references (will be absolute at runtime)
+  # Exception 9: Environment variable references (will be absolute at runtime)
   # MATCHES: os.environ.get('OUTPUT_PATH'), ${OUTPUT_DIR}/file.csv
   - "\\$\\{[A-Z_]+\\}"
   - "os\\.environ"
   - "getenv\\s*\\("
 
-  # Exception 11: f-strings or format strings with variables (may become absolute)
+  # Exception 10: f-strings or format strings with variables (may become absolute)
   # MATCHES: f"{base_path}/file.csv", "{path}/output.csv".format(...)
   # Note: Only skip if there's a variable that might contain absolute path
   - "f[\"'][^\"']*\\\\{[^}]+\\\\}[^\"']*/[^\"']*[\"']"
   - "[\"'][^\"']*\\\\{[^}]+\\\\}[^\"']*/[^\"']*[\"'].*\\\\.format\\\\s*\\\\("
 
-  # Exception 12: Already validated paths (common validation patterns)
+  # Exception 11: Already validated paths (common validation patterns)
   # MATCHES: if path.startswith('/') or path.is_absolute()
   - "path\\.startswith\\s*\\([\"']/[\"']\\)"
   - "path\\.is_absolute\\s*\\(\\)"
   - "os\\.path\\.isabs\\s*\\("
 
-  # Exception 13: Explicit /dev/null or /dev/stdout (Unix special files)
+  # Exception 12: Explicit /dev/null or /dev/stdout (Unix special files)
   # MATCHES: open("/dev/null", "w")
   - "/dev/(?:null|stdout|stderr)"
 
-  # Exception 14: Windows absolute paths (C:\, D:\)
-  # MATCHES: C:\data\file.csv (less common in Databricks but valid)
-  - "[A-Z]:\\\\[^\"'\\s]+"
-
-  # Exception 15: Mock/test data in assertions
-  # MATCHES: assert result == "output.csv"
-  - "assert.*[\"'][^/][^\"']*[\"']"
 
 patterns:
   # ==========================================================================
