@@ -45,3 +45,5 @@ reports*
 logs*
 *.log
 *.csv
+*.txt
+

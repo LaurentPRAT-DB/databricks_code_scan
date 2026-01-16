@@ -8,7 +8,7 @@ Exception patterns are a powerful feature in the Databricks Workspace Scanner th
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│             Scan Line from Source File                       │
+│             Scan Line from Source File                      │
 └────────────────────────────┬────────────────────────────────┘
                              │
                     ┌────────▼─────────┐
@@ -16,7 +16,7 @@ Exception patterns are a powerful feature in the Databricks Workspace Scanner th
                     └────────┬─────────┘
                              │
                    ┌─────────▼──────────┐
-                   │ Match Exception?    │
+                   │ Match Exception?   │
                    └─────────┬──────────┘
                              │
               ┌──────────────┴──────────────┐
