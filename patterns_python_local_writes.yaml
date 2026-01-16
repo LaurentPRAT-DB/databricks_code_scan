@@ -36,7 +36,7 @@
 #   - Databricks magic commands (%run, %pip, %sh)
 #   - Already using proper storage paths
 #
-# TOTAL EXCEPTIONS: 16 patterns
+# TOTAL EXCEPTIONS: 17 patterns
 # ==========================================================================
 
 exceptions:
@@ -135,6 +135,11 @@ exceptions:
   - "np\\.(?:load|loadtxt|genfromtxt|fromfile)\\s*\\("
   - "open\\s*\\([^)]*[\"']r[bt]?[\"']"
   - "(?:json|pickle|yaml|joblib)\\.(?:load|safe_load)\\s*\\("
+
+  # Exception 17: dbutils.notebook.run() - notebook execution (not file writes)
+  # MATCHES: dbutils.notebook.run('./notebook_path', ...), dbutils.notebook.run("relative/path")
+  # WHY: This executes another notebook, it's not a file write operation
+  - "dbutils\\.notebook\\.run\\s*\\("
 
 
 patterns:

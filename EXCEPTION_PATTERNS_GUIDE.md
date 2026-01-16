@@ -63,7 +63,7 @@ patterns:
 
 ## Built-in Exceptions
 
-The `patterns_python_local_writes` configuration includes 16 built-in exception categories:
+The `patterns_python_local_writes` configuration includes 17 built-in exception categories:
 
 ### 1. Unity Catalog Volumes (✅ CORRECT Usage)
 
@@ -305,6 +305,25 @@ config = yaml.safe_load(open('./config.yaml'))     # SKIPPED
 ```
 
 **Why Skip**: These are READ operations, not WRITE operations. The scanner detects local file writes, so read operations should not be flagged.
+
+### 17. Databricks Notebook Execution (🔗 Control Flow)
+
+```python
+# Pattern: dbutils\\.notebook\\.run\\s*\\(
+
+# Execute another notebook with relative path
+result = dbutils.notebook.run('./helper_notebook', 60)      # SKIPPED
+
+# Execute notebook in subdirectory
+dbutils.notebook.run('./utils/data_processor', 120)         # SKIPPED
+
+# Execute with timeout parameter
+output = dbutils.notebook.run('relative/path/to/notebook', # SKIPPED
+                              timeout_seconds=300,
+                              arguments={'param': 'value'})
+```
+
+**Why Skip**: `dbutils.notebook.run()` executes another notebook, it's not a file write operation. This is a control flow mechanism for orchestrating notebook workflows, not data persistence.
 
 ## Custom Exceptions
 
