@@ -99,6 +99,29 @@ python scan_databricks_workspace.py \
   --output results.txt
 ```
 
+### Using Verbose Mode (Track All Scanned Paths)
+```bash
+# Verbose mode shows all directories and files scanned
+python scan_databricks_workspace.py \
+  --profile dev \
+  --config patterns_cwd_file_writes.yaml \
+  --verbose \
+  --output scan_with_paths.txt
+
+# Short form with -v flag
+python scan_databricks_workspace.py \
+  -p production \
+  -v \
+  --config patterns_cwd_file_writes.yaml \
+  -o verbose_scan.txt
+```
+
+Verbose mode is useful to:
+- Verify recursive scanning is working correctly
+- See which files are skipped due to language filters
+- Debug missing files or incomplete scans
+- Generate comprehensive audit reports with all paths
+
 ## Understanding the Results
 
 ### Console Output

@@ -28,7 +28,8 @@ class DatabricksWorkspaceScanner:
     """Scanner for Databricks workspace source code files."""
 
     def __init__(self, host: str = None, token: str = None, profile: str = None,
-                 patterns: List[str] = None, languages: List[str] = None):
+                 patterns: List[str] = None, languages: List[str] = None,
+                 verbose: bool = False):
         """Initialize the scanner with Databricks credentials and configuration.
 
         This constructor establishes a connection to a Databricks workspace using
@@ -47,6 +48,8 @@ class DatabricksWorkspaceScanner:
                 Defaults to None.
             languages (List[str], optional): List of language names to filter
                 (e.g., ['python', 'sql', 'scala']). Defaults to ['python'].
+            verbose (bool, optional): Enable verbose mode to track all scanned paths.
+                Defaults to False.
 
         Raises:
             ValueError: If connection to Databricks workspace fails due to invalid
@@ -115,9 +118,17 @@ class DatabricksWorkspaceScanner:
         self.source_files: List[Dict] = []
         self.pattern_matches: List[Dict] = []
 
+        # Verbose mode: track all scanned paths
+        self.verbose = verbose
+        self.scanned_directories: List[str] = []
+        self.scanned_files: List[str] = []
+        self.skipped_files: List[Dict] = []  # Files that didn't match language filter
+
         # Set up language filters (default to Python only)
         self.languages = [lang.lower() for lang in (languages or ['python'])]
         print(f"Filtering for languages: {', '.join(self.languages)}")
+        if self.verbose:
+            print("Verbose mode: ON - will track all scanned paths")
 
         # Compile regex patterns
         self.patterns: List[Pattern] = []
@@ -328,6 +339,11 @@ class DatabricksWorkspaceScanner:
             path: Path to scan (default: root '/')
         """
         try:
+            # Track directory in verbose mode
+            if self.verbose:
+                self.scanned_directories.append(path)
+                print(f"  Scanning directory: {path}")
+
             objects = self.client.workspace.list(path)
 
             for obj in objects:
@@ -335,6 +351,11 @@ class DatabricksWorkspaceScanner:
                     # Recursively scan subdirectories
                     self.scan_directory(obj.path)
                 elif self.is_source_code(obj):
+                    # Track file in verbose mode
+                    if self.verbose:
+                        self.scanned_files.append(obj.path)
+                        print(f"    ✓ Matched: {obj.path}")
+
                     # Add source code files to the list
                     lang = getattr(obj, 'language', 'UNKNOWN')
                     # Convert Language enum to string
@@ -361,9 +382,37 @@ class DatabricksWorkspaceScanner:
                         if content:
                             matches = self.search_patterns_in_content(obj.path, content)
                             self.pattern_matches.extend(matches)
+                else:
+                    # Track skipped files in verbose mode
+                    if self.verbose and obj.object_type == ObjectType.FILE:
+                        self.skipped_files.append({
+                            'path': obj.path,
+                            'type': obj.object_type.value,
+                            'reason': 'Language filter'
+                        })
+                        print(f"    ⊘ Skipped: {obj.path} (language filter)")
+                    elif self.verbose and obj.object_type == ObjectType.NOTEBOOK:
+                        notebook_lang = getattr(obj, 'language', 'UNKNOWN')
+                        lang_str = 'UNKNOWN'
+                        if notebook_lang and notebook_lang != 'UNKNOWN':
+                            if hasattr(notebook_lang, 'name'):
+                                lang_str = notebook_lang.name
+                            elif hasattr(notebook_lang, 'value'):
+                                lang_str = str(notebook_lang.value)
+                            else:
+                                lang_str = str(notebook_lang)
+                        self.skipped_files.append({
+                            'path': obj.path,
+                            'type': obj.object_type.value,
+                            'language': lang_str,
+                            'reason': 'Language filter'
+                        })
+                        print(f"    ⊘ Skipped: {obj.path} (language: {lang_str})")
 
         except Exception as e:
             print(f"Warning: Could not access {path}: {str(e)}", file=sys.stderr)
+            if self.verbose:
+                print(f"  ✗ Error accessing: {path}", file=sys.stderr)
 
     def scan_workspace(self, start_path: str = '/') -> List[Dict]:
         """Scan Databricks workspace recursively for source code files matching language filter.
@@ -411,11 +460,52 @@ class DatabricksWorkspaceScanner:
         print(f"Scanning Databricks workspace starting from: {start_path}")
         self.source_files = []
         self.pattern_matches = []
+        if self.verbose:
+            self.scanned_directories = []
+            self.scanned_files = []
+            self.skipped_files = []
+
         self.scan_directory(start_path)
-        print(f"Found {len(self.source_files)} source code files")
+
+        print(f"\nFound {len(self.source_files)} source code files")
         if self.patterns:
             print(f"Found {len(self.pattern_matches)} pattern match(es)")
+
+        # Print verbose statistics
+        if self.verbose:
+            self.print_verbose_stats()
+
         return self.source_files
+
+    def print_verbose_stats(self) -> None:
+        """Print verbose statistics about scanned paths."""
+        if not self.verbose:
+            return
+
+        print("\n" + "=" * 80)
+        print("VERBOSE MODE: SCAN STATISTICS")
+        print("=" * 80)
+        print(f"Total directories scanned: {len(self.scanned_directories)}")
+        print(f"Total files scanned: {len(self.scanned_files)}")
+        print(f"Total files matched: {len(self.source_files)}")
+        print(f"Total files skipped: {len(self.skipped_files)}")
+
+        if self.scanned_directories:
+            print(f"\nDirectories scanned ({len(self.scanned_directories)}):")
+            print("-" * 80)
+            for directory in sorted(self.scanned_directories):
+                print(f"  {directory}")
+
+        if self.skipped_files:
+            print(f"\nFiles skipped ({len(self.skipped_files)}):")
+            print("-" * 80)
+            for file in sorted(self.skipped_files, key=lambda x: x['path']):
+                reason = file.get('reason', 'Unknown')
+                lang = file.get('language', '')
+                if lang and lang != 'UNKNOWN':
+                    print(f"  {file['path']} [{file['type']}] [{lang}] - {reason}")
+                else:
+                    print(f"  {file['path']} [{file['type']}] - {reason}")
 
     def print_results(self, group_by_type: bool = False) -> None:
         """
@@ -496,7 +586,24 @@ class DatabricksWorkspaceScanner:
             f.write(f"Total files: {len(self.source_files)}\n")
             if self.patterns:
                 f.write(f"Total pattern matches: {len(self.pattern_matches)}\n")
+
+            # Write verbose statistics if verbose mode is enabled
+            if self.verbose:
+                f.write(f"\nVERBOSE MODE STATISTICS:\n")
+                f.write(f"Total directories scanned: {len(self.scanned_directories)}\n")
+                f.write(f"Total files scanned: {len(self.scanned_files)}\n")
+                f.write(f"Total files matched: {len(self.source_files)}\n")
+                f.write(f"Total files skipped: {len(self.skipped_files)}\n")
+
             f.write("\n")
+
+            # Write verbose directory list if enabled
+            if self.verbose and self.scanned_directories:
+                f.write("DIRECTORIES SCANNED\n")
+                f.write("-" * 80 + "\n\n")
+                for directory in sorted(self.scanned_directories):
+                    f.write(f"{directory}\n")
+                f.write("\n\n")
 
             # Write file list
             f.write("SOURCE CODE FILES\n")
@@ -507,6 +614,19 @@ class DatabricksWorkspaceScanner:
                     f.write(f"{file['path']} [{file['type']}] [{language}]\n")
                 else:
                     f.write(f"{file['path']} [{file['type']}]\n")
+
+            # Write skipped files if verbose mode is enabled
+            if self.verbose and self.skipped_files:
+                f.write("\n\n")
+                f.write("FILES SKIPPED (Language Filter)\n")
+                f.write("-" * 80 + "\n\n")
+                for file in sorted(self.skipped_files, key=lambda x: x['path']):
+                    reason = file.get('reason', 'Unknown')
+                    lang = file.get('language', '')
+                    if lang and lang != 'UNKNOWN':
+                        f.write(f"{file['path']} [{file['type']}] [{lang}] - {reason}\n")
+                    else:
+                        f.write(f"{file['path']} [{file['type']}] - {reason}\n")
 
             # Write pattern matches if any
             if self.pattern_matches:
@@ -637,6 +757,10 @@ Pattern Searching:
   Use --pattern for individual patterns or --config for a config file with multiple patterns.
   Patterns are regular expressions that will be searched in all source code files.
 
+Verbose Mode:
+  Use --verbose or -v to track all scanned paths including directories, matched files,
+  and skipped files. This helps verify recursive scanning and debug language filters.
+
 Examples:
   # Basic scan with a profile (Python only by default)
   %(prog)s --profile production
@@ -655,6 +779,12 @@ Examples:
 
   # Scan multiple languages with patterns
   %(prog)s -p dev --language python --language scala --pattern "TODO" -g
+
+  # Verbose mode to see all scanned paths
+  %(prog)s -p dev --verbose --path /Users/user.name -o results.txt
+
+  # Verbose scan with patterns
+  %(prog)s -p prod -v --config patterns.yaml -o verbose_scan.txt
         """
     )
     # Authentication arguments
@@ -688,6 +818,12 @@ Examples:
         '-g',
         action='store_true',
         help='Group files by type in the output'
+    )
+    parser.add_argument(
+        '--verbose',
+        '-v',
+        action='store_true',
+        help='Enable verbose mode to track all scanned paths (directories, matched files, skipped files)'
     )
 
     # Language filtering
@@ -740,7 +876,8 @@ Examples:
             token=args.token,
             profile=args.profile,
             patterns=patterns if patterns else None,
-            languages=languages
+            languages=languages,
+            verbose=args.verbose
         )
 
         # Scan workspace
