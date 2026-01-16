@@ -38,3 +38,10 @@ security_patterns.yaml
 # OS
 .DS_Store
 Thumbs.db
+
+# results output
+results*
+reports*
+logs*
+*.log
+*.csv
