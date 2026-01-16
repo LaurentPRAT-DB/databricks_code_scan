@@ -452,6 +452,10 @@ class DatabricksWorkspaceScanner:
     def find_matching_paths(self, pattern: str) -> List[str]:
         """Find workspace paths matching a wildcard pattern.
 
+        This method uses an efficient incremental matching approach that only
+        lists directories at each level as needed, rather than scanning the
+        entire workspace first.
+
         Args:
             pattern: Path pattern with wildcards (* or ?)
                      Examples: /Users/*/notebooks, /Users/john.*, /Shared/team*
@@ -465,44 +469,54 @@ class DatabricksWorkspaceScanner:
 
         matching_paths = []
 
-        # Split pattern into parts
+        # Normalize pattern: remove leading/trailing slashes, split into parts
+        pattern = pattern.strip('/')
         parts = pattern.split('/')
 
         def traverse_and_match(current_path: str, remaining_parts: List[str]):
             """Recursively traverse workspace and match pattern parts."""
             if not remaining_parts:
                 # All parts matched, add this path
-                matching_paths.append(current_path)
+                matching_paths.append(current_path if current_path else '/')
                 return
 
             current_part = remaining_parts[0]
             next_parts = remaining_parts[1:]
 
-            # If this part has no wildcards, just append and continue
+            # If this part has no wildcards, verify it exists and continue
             if '*' not in current_part and '?' not in current_part:
-                next_path = f"{current_path}/{current_part}" if current_path else f"/{current_part}"
-                traverse_and_match(next_path, next_parts)
+                next_path = f"{current_path}/{current_part}"
+                # Verify the path exists before continuing
+                try:
+                    obj = self.client.workspace.get_status(next_path)
+                    if obj.object_type == ObjectType.DIRECTORY:
+                        traverse_and_match(next_path, next_parts)
+                    elif not next_parts:
+                        # Last part can be a file, but we only want directories for scanning
+                        if self.verbose:
+                            print(f"  Skipping non-directory path: {next_path}", file=sys.stderr)
+                except Exception as e:
+                    if self.verbose:
+                        print(f"  Path does not exist or inaccessible: {next_path}", file=sys.stderr)
                 return
 
             # This part has wildcards, list current directory and filter
             try:
-                objects = self.client.workspace.list(current_path if current_path else '/')
+                list_path = current_path if current_path else '/'
+                objects = self.client.workspace.list(list_path)
+
                 for obj in objects:
                     if obj.object_type == ObjectType.DIRECTORY:
                         # Get just the name (last part of path)
                         obj_name = obj.path.split('/')[-1]
-                        # Check if it matches the pattern
+                        # Check if it matches the wildcard pattern for this segment
                         if fnmatch.fnmatch(obj_name, current_part):
                             traverse_and_match(obj.path, next_parts)
             except Exception as e:
                 if self.verbose:
-                    print(f"  Warning: Could not list {current_path}: {str(e)}", file=sys.stderr)
+                    print(f"  Warning: Could not list {list_path}: {str(e)}", file=sys.stderr)
 
-        # Start traversal from root
-        # Handle leading slash in pattern
-        if parts and parts[0] == '':
-            parts = parts[1:]  # Remove empty string from leading /
-
+        # Start traversal from root with cleaned parts
         if parts:
             traverse_and_match('', parts)
 
@@ -874,6 +888,15 @@ Verbose Mode:
   Use --verbose or -v to track all scanned paths including directories, matched files,
   and skipped files. This helps verify recursive scanning and debug language filters.
 
+Wildcard Paths (IMPORTANT - Always Use Quotes!):
+  The --path argument refers to DATABRICKS WORKSPACE paths, not local filesystem.
+  Without quotes, your shell expands wildcards against LOCAL files before Python sees them.
+
+  ✓ CORRECT:   --path "/Users/laurent*"     (wildcard evaluated in Databricks)
+  ✗ WRONG:     --path /Users/laurent*       (shell expands against local /Users/)
+
+  Always quote wildcard patterns to match Databricks workspace paths!
+
 Examples:
   # Basic scan with a profile (Python only by default)
   %(prog)s --profile production
@@ -899,13 +922,13 @@ Examples:
   # Verbose scan with patterns
   %(prog)s -p prod -v --config patterns.yaml -o verbose_scan.txt
 
-  # Wildcard paths - scan all users
+  # Wildcard paths - scan all users (IMPORTANT: use quotes to prevent shell expansion!)
   %(prog)s -p prod --path "/Users/*" --config patterns.yaml -o all_users.txt
 
-  # Wildcard paths - scan specific pattern
+  # Wildcard paths - scan specific pattern (quotes required)
   %(prog)s -p dev --path "/Users/john.*" -l python -o johns_notebooks.txt
 
-  # Wildcard paths - scan team folders
+  # Wildcard paths - scan team folders (quotes required)
   %(prog)s -p prod --path "/Shared/team*" --config patterns.yaml -g -o teams_scan.txt
         """
     )
@@ -928,8 +951,10 @@ Examples:
     parser.add_argument(
         '--path',
         default='/',
-        help='Starting path to scan. Supports wildcards (* and ?) for pattern matching. '
-             'Examples: /Users/*/notebooks, /Shared/team*, /Users/john.doe*  (default: /)'
+        help='Starting path in the DATABRICKS WORKSPACE (not local filesystem). '
+             'Supports wildcards (* and ?) for pattern matching DATABRICKS paths. '
+             'IMPORTANT: Use QUOTES to prevent shell expansion on local machine! '
+             'Examples: "/Users/*/notebooks", "/Shared/team*", "/Users/john.doe*"  (default: /)'
     )
     parser.add_argument(
         '--output',
@@ -1052,6 +1077,26 @@ Examples:
                 scanner.print_verbose_stats()
         else:
             # Single path scan (original behavior)
+            # Helpful diagnostic: detect if path looks like it might have been shell-expanded
+            if args.path != '/' and not args.path.startswith('dbfs:'):
+                # Check if this looks like a partial username or team name without wildcards
+                path_parts = args.path.rstrip('/').split('/')
+                if len(path_parts) >= 2:
+                    last_part = path_parts[-1]
+                    # Common patterns that might indicate forgotten quotes
+                    if (last_part and
+                        not last_part.endswith(('.py', '.sql', '.scala', '.r', '.ipynb')) and
+                        len(last_part) < 50):  # Reasonable username/folder length
+                        print(f"⚠️  IMPORTANT: Scanning single Databricks workspace path: {args.path}")
+                        print(f"    If you intended to use wildcards to match DATABRICKS paths, you MUST quote the path!")
+                        print(f"    ")
+                        print(f"    Your shell expands unquoted wildcards against your LOCAL filesystem.")
+                        print(f"    To match patterns in the DATABRICKS workspace, use quotes:")
+                        print(f"    ")
+                        print(f"    ✓ Correct:   --path \"/Users/laurent*\"")
+                        print(f"    ✗ Wrong:     --path /Users/laurent*  (shell expands this locally)")
+                        print()
+
             scanner.scan_workspace(start_path=args.path)
 
         # Print results

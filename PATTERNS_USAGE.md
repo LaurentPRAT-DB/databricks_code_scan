@@ -115,6 +115,72 @@ Verbose mode is useful to:
 - Debug missing files or incomplete scans
 - Generate comprehensive audit reports with all paths
 
+### Using Wildcard Paths
+
+**CRITICAL:** The `--path` argument refers to paths in your **Databricks workspace**, NOT your local filesystem.
+
+**Shell Expansion Problem:**
+When you type a wildcard without quotes, your shell (bash/zsh) expands it by looking at your **LOCAL filesystem** before Python even sees the argument!
+
+```bash
+# ❌ WRONG - Shell expands against LOCAL filesystem:
+python scan_databricks_workspace.py --path /Users/laurent*
+
+# What happens:
+# 1. Your shell sees /Users/laurent*
+# 2. Looks at LOCAL /Users/ directory
+# 3. Finds /Users/laurent.prat (local directory)
+# 4. Passes "/Users/laurent.prat" to Python
+# 5. Script tries to scan that exact path in DATABRICKS (doesn't exist!)
+# 6. Error: Path (/Users/laurent.prat) doesn't exist.
+```
+
+```bash
+# ✓ CORRECT - Quotes prevent shell expansion:
+python scan_databricks_workspace.py --path "/Users/laurent*"
+
+# What happens:
+# 1. Your shell sees quoted "/Users/laurent*"
+# 2. Passes it literally to Python (no expansion)
+# 3. Script lists DATABRICKS workspace /Users/ directory
+# 4. Matches all directories starting with "laurent"
+# 5. Finds /Users/laurent.prat@databricks.com (in Databricks!)
+# 6. Scans the matched Databricks paths
+```
+
+**Correct Examples:**
+
+```bash
+# Scan all user directories in DATABRICKS workspace
+python scan_databricks_workspace.py \
+  --profile production \
+  --path "/Users/*" \
+  --config patterns_cwd_file_writes.yaml \
+  --output all_users_scan.txt
+
+# Scan specific user pattern in DATABRICKS
+python scan_databricks_workspace.py \
+  --profile dev \
+  --path "/Users/laurent*" \
+  --config patterns_cwd_file_writes.yaml \
+  --output laurent_scan.txt
+
+# Scan team folders in DATABRICKS
+python scan_databricks_workspace.py \
+  --profile production \
+  --path "/Shared/team*" \
+  --config patterns_cwd_file_writes.yaml \
+  --group-by-type \
+  --output teams_scan.txt
+
+# Scan nested wildcards in DATABRICKS
+python scan_databricks_workspace.py \
+  --profile dev \
+  --path "/Users/*/notebooks" \
+  --config patterns_cwd_file_writes.yaml \
+  --verbose
+```
+
 ## Understanding the Results
 
 ### Console Output
