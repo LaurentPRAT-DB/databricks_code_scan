@@ -18,6 +18,9 @@ import sys
 import re
 import yaml
 import fnmatch
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Optional, Pattern
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.config import Config
@@ -118,6 +121,16 @@ class DatabricksWorkspaceScanner:
         self.source_files: List[Dict] = []
         self.pattern_matches: List[Dict] = []
 
+        # Thread safety locks for parallel processing
+        self._results_lock = threading.Lock()
+        self._verbose_lock = threading.Lock()
+        self._print_lock = threading.Lock()
+
+        # Track timeout errors for adaptive thread reduction
+        self.timeout_errors = 0
+        self.total_requests = 0
+        self._error_lock = threading.Lock()
+
         # Verbose mode: track all scanned paths
         self.verbose = verbose
         self.scanned_directories: List[str] = []
@@ -164,6 +177,54 @@ class DatabricksWorkspaceScanner:
                 except re.error as e:
                     print(f"  ✗ Invalid regex pattern '{pattern_str}': {e}", file=sys.stderr)
             print()
+
+    def _track_request_error(self, is_timeout: bool = False):
+        """Track API request errors for adaptive threading."""
+        with self._error_lock:
+            self.total_requests += 1
+            if is_timeout:
+                self.timeout_errors += 1
+
+    def _get_error_rate(self) -> float:
+        """Calculate current timeout error rate."""
+        with self._error_lock:
+            if self.total_requests == 0:
+                return 0.0
+            return self.timeout_errors / self.total_requests
+
+    def _add_source_file(self, file_info: Dict):
+        """Thread-safe method to add a source file."""
+        with self._results_lock:
+            self.source_files.append(file_info)
+
+    def _add_pattern_matches(self, matches: List[Dict]):
+        """Thread-safe method to add pattern matches."""
+        if matches:
+            with self._results_lock:
+                self.pattern_matches.extend(matches)
+
+    def _add_verbose_directory(self, path: str):
+        """Thread-safe method to track scanned directory."""
+        if self.verbose:
+            with self._verbose_lock:
+                self.scanned_directories.append(path)
+
+    def _add_verbose_file(self, path: str):
+        """Thread-safe method to track scanned file."""
+        if self.verbose:
+            with self._verbose_lock:
+                self.scanned_files.append(path)
+
+    def _add_skipped_file(self, file_info: Dict):
+        """Thread-safe method to track skipped file."""
+        if self.verbose:
+            with self._verbose_lock:
+                self.skipped_files.append(file_info)
+
+    def _thread_safe_print(self, message: str):
+        """Thread-safe print to avoid interleaved output."""
+        with self._print_lock:
+            print(message)
 
     def is_source_code(self, obj: ObjectInfo) -> bool:
         """
@@ -273,6 +334,7 @@ class DatabricksWorkspaceScanner:
             ...     print(f"Notebook has {len(content)} characters")
         """
         try:
+            self._track_request_error(is_timeout=False)
             if obj_type == ObjectType.NOTEBOOK:
                 # Export notebook as SOURCE format
                 response = self.client.workspace.export(path, format=ExportFormat.SOURCE)
@@ -291,7 +353,13 @@ class DatabricksWorkspaceScanner:
                     return content
         except UnicodeDecodeError as e:
             print(f"Warning: Could not decode {path}: not a text file or unsupported encoding", file=sys.stderr)
+        except TimeoutError as e:
+            self._track_request_error(is_timeout=True)
+            print(f"Warning: Timeout downloading {path}: {str(e)}", file=sys.stderr)
         except Exception as e:
+            error_msg = str(e).lower()
+            if 'timeout' in error_msg or 'timed out' in error_msg:
+                self._track_request_error(is_timeout=True)
             print(f"Warning: Could not download {path}: {str(e)}", file=sys.stderr)
         return None
 
@@ -375,10 +443,12 @@ class DatabricksWorkspaceScanner:
         """
         try:
             # Track directory in verbose mode
+            self._add_verbose_directory(path)
             if self.verbose:
-                self.scanned_directories.append(path)
-                print(f"  Scanning directory: {path}")
+                self._thread_safe_print(f"  Scanning directory: {path}")
 
+            # Track API request
+            self._track_request_error(is_timeout=False)
             objects = self.client.workspace.list(path)
 
             for obj in objects:
@@ -387,9 +457,9 @@ class DatabricksWorkspaceScanner:
                     self.scan_directory(obj.path)
                 elif self.is_source_code(obj):
                     # Track file in verbose mode
+                    self._add_verbose_file(obj.path)
                     if self.verbose:
-                        self.scanned_files.append(obj.path)
-                        print(f"    ✓ Matched: {obj.path}")
+                        self._thread_safe_print(f"    ✓ Matched: {obj.path}")
 
                     # Add source code files to the list
                     lang = getattr(obj, 'language', 'UNKNOWN')
@@ -409,23 +479,23 @@ class DatabricksWorkspaceScanner:
                         'type': obj.object_type.value,
                         'language': lang_str
                     }
-                    self.source_files.append(file_info)
+                    self._add_source_file(file_info)
 
                     # If patterns are defined, download and search content
                     if self.patterns:
                         content = self.get_file_content(obj.path, obj.object_type)
                         if content:
                             matches = self.search_patterns_in_content(obj.path, content)
-                            self.pattern_matches.extend(matches)
+                            self._add_pattern_matches(matches)
                 else:
                     # Track skipped files in verbose mode
                     if self.verbose and obj.object_type == ObjectType.FILE:
-                        self.skipped_files.append({
+                        self._add_skipped_file({
                             'path': obj.path,
                             'type': obj.object_type.value,
                             'reason': 'Language filter'
                         })
-                        print(f"    ⊘ Skipped: {obj.path} (language filter)")
+                        self._thread_safe_print(f"    ⊘ Skipped: {obj.path} (language filter)")
                     elif self.verbose and obj.object_type == ObjectType.NOTEBOOK:
                         notebook_lang = getattr(obj, 'language', 'UNKNOWN')
                         lang_str = 'UNKNOWN'
@@ -436,18 +506,28 @@ class DatabricksWorkspaceScanner:
                                 lang_str = str(notebook_lang.value)
                             else:
                                 lang_str = str(notebook_lang)
-                        self.skipped_files.append({
+                        self._add_skipped_file({
                             'path': obj.path,
                             'type': obj.object_type.value,
                             'language': lang_str,
                             'reason': 'Language filter'
                         })
-                        print(f"    ⊘ Skipped: {obj.path} (language: {lang_str})")
+                        self._thread_safe_print(f"    ⊘ Skipped: {obj.path} (language: {lang_str})")
 
+        except TimeoutError as e:
+            self._track_request_error(is_timeout=True)
+            print(f"Warning: Timeout accessing {path}: {str(e)}", file=sys.stderr)
+            if self.verbose:
+                self._thread_safe_print(f"  ✗ Timeout accessing: {path}")
         except Exception as e:
+            self._track_request_error(is_timeout=False)
+            # Check if error message indicates timeout
+            error_msg = str(e).lower()
+            if 'timeout' in error_msg or 'timed out' in error_msg:
+                self._track_request_error(is_timeout=True)
             print(f"Warning: Could not access {path}: {str(e)}", file=sys.stderr)
             if self.verbose:
-                print(f"  ✗ Error accessing: {path}", file=sys.stderr)
+                self._thread_safe_print(f"  ✗ Error accessing: {path}")
 
     def find_matching_paths(self, pattern: str) -> List[str]:
         """Find workspace paths matching a wildcard pattern.
@@ -488,6 +568,7 @@ class DatabricksWorkspaceScanner:
                 next_path = f"{current_path}/{current_part}"
                 # Verify the path exists before continuing
                 try:
+                    self._track_request_error(is_timeout=False)
                     obj = self.client.workspace.get_status(next_path)
                     if obj.object_type == ObjectType.DIRECTORY:
                         traverse_and_match(next_path, next_parts)
@@ -495,7 +576,14 @@ class DatabricksWorkspaceScanner:
                         # Last part can be a file, but we only want directories for scanning
                         if self.verbose:
                             print(f"  Skipping non-directory path: {next_path}", file=sys.stderr)
+                except TimeoutError as e:
+                    self._track_request_error(is_timeout=True)
+                    if self.verbose:
+                        print(f"  Timeout checking path: {next_path}", file=sys.stderr)
                 except Exception as e:
+                    error_msg = str(e).lower()
+                    if 'timeout' in error_msg or 'timed out' in error_msg:
+                        self._track_request_error(is_timeout=True)
                     if self.verbose:
                         print(f"  Path does not exist or inaccessible: {next_path}", file=sys.stderr)
                 return
@@ -503,6 +591,7 @@ class DatabricksWorkspaceScanner:
             # This part has wildcards, list current directory and filter
             try:
                 list_path = current_path if current_path else '/'
+                self._track_request_error(is_timeout=False)
                 objects = self.client.workspace.list(list_path)
 
                 for obj in objects:
@@ -512,7 +601,14 @@ class DatabricksWorkspaceScanner:
                         # Check if it matches the wildcard pattern for this segment
                         if fnmatch.fnmatch(obj_name, current_part):
                             traverse_and_match(obj.path, next_parts)
+            except TimeoutError as e:
+                self._track_request_error(is_timeout=True)
+                if self.verbose:
+                    print(f"  Warning: Timeout listing {list_path}: {str(e)}", file=sys.stderr)
             except Exception as e:
+                error_msg = str(e).lower()
+                if 'timeout' in error_msg or 'timed out' in error_msg:
+                    self._track_request_error(is_timeout=True)
                 if self.verbose:
                     print(f"  Warning: Could not list {list_path}: {str(e)}", file=sys.stderr)
 
@@ -521,6 +617,107 @@ class DatabricksWorkspaceScanner:
             traverse_and_match('', parts)
 
         return matching_paths
+
+    def scan_single_path(self, path: str, path_index: int = 0, total_paths: int = 1) -> Dict:
+        """Scan a single path (used by parallel scanning).
+
+        Args:
+            path: Path to scan
+            path_index: Index of this path in the list (for progress tracking)
+            total_paths: Total number of paths being scanned
+
+        Returns:
+            Dict with scan statistics
+        """
+        try:
+            start_time = time.time()
+            self._thread_safe_print(f"[Thread {path_index+1}/{total_paths}] Starting: {path}")
+
+            # Scan the directory
+            self.scan_directory(path)
+
+            elapsed = time.time() - start_time
+            self._thread_safe_print(f"[Thread {path_index+1}/{total_paths}] Completed: {path} ({elapsed:.1f}s)")
+
+            return {
+                'path': path,
+                'success': True,
+                'elapsed': elapsed,
+                'error': None
+            }
+        except Exception as e:
+            error_msg = str(e)
+            self._thread_safe_print(f"[Thread {path_index+1}/{total_paths}] Failed: {path} - {error_msg}")
+            return {
+                'path': path,
+                'success': False,
+                'elapsed': 0,
+                'error': error_msg
+            }
+
+    def scan_workspace_parallel(self, paths: List[str], max_workers: int = 10) -> List[Dict]:
+        """Scan multiple workspace paths in parallel with adaptive thread reduction.
+
+        Args:
+            paths: List of paths to scan
+            max_workers: Maximum number of threads (default: 10)
+
+        Returns:
+            List of scan result dictionaries
+        """
+        if not paths:
+            return []
+
+        print(f"\n{'='*80}")
+        print(f"PARALLEL SCAN: {len(paths)} path(s) with up to {max_workers} threads")
+        print(f"{'='*80}\n")
+
+        # Adaptive threading: reduce workers if high error rate
+        current_workers = max_workers
+        results = []
+
+        with ThreadPoolExecutor(max_workers=current_workers) as executor:
+            # Submit all tasks
+            future_to_path = {}
+            for i, path in enumerate(paths):
+                future = executor.submit(self.scan_single_path, path, i, len(paths))
+                future_to_path[future] = path
+
+            # Process completed tasks and check error rate
+            completed = 0
+            for future in as_completed(future_to_path):
+                result = future.result()
+                results.append(result)
+                completed += 1
+
+                # Check error rate every 5 completions
+                if completed % 5 == 0:
+                    error_rate = self._get_error_rate()
+                    if error_rate > 0.3 and current_workers > 2:  # >30% timeout rate
+                        old_workers = current_workers
+                        current_workers = max(2, current_workers // 2)
+                        print(f"\n⚠️  High timeout rate ({error_rate:.1%}) - reducing threads: {old_workers} → {current_workers}")
+                        print(f"   Consider reducing --threads if timeouts persist\n")
+
+        # Print summary
+        successful = sum(1 for r in results if r['success'])
+        failed = len(results) - successful
+        total_time = sum(r['elapsed'] for r in results if r['success'])
+
+        print(f"\n{'='*80}")
+        print(f"PARALLEL SCAN COMPLETE")
+        print(f"{'='*80}")
+        print(f"Total paths scanned: {len(results)}")
+        print(f"  Successful: {successful}")
+        print(f"  Failed: {failed}")
+        if successful > 0:
+            print(f"  Total scan time: {total_time:.1f}s")
+            print(f"  Average per path: {total_time/successful:.1f}s")
+        if self.timeout_errors > 0:
+            print(f"  Timeout errors: {self.timeout_errors} ({self._get_error_rate():.1%})")
+        print()
+
+        return results
 
     def scan_workspace(self, start_path: str = '/', reset_results: bool = True) -> List[Dict]:
         """Scan Databricks workspace recursively for source code files matching language filter.
@@ -897,6 +1094,17 @@ Wildcard Paths (IMPORTANT - Always Use Quotes!):
 
   Always quote wildcard patterns to match Databricks workspace paths!
 
+Parallel Scanning (--threads):
+  Enable parallel processing to scan multiple paths concurrently (one path per thread).
+  Default: 10 threads when --threads is specified without a number.
+  The scanner automatically reduces thread count if timeout errors occur (>30%% rate).
+
+  Best practices:
+  - Use with wildcard paths that match multiple directories
+  - Start with 10 threads and adjust based on timeout errors
+  - Lower thread count (5 or less) for rate-limited APIs
+  - Monitor timeout messages and reduce threads if needed
+
 Examples:
   # Basic scan with a profile (Python only by default)
   %(prog)s --profile production
@@ -930,6 +1138,15 @@ Examples:
 
   # Wildcard paths - scan team folders (quotes required)
   %(prog)s -p prod --path "/Shared/team*" --config patterns.yaml -g -o teams_scan.txt
+
+  # Parallel scan with 10 threads (default when --threads is used)
+  %(prog)s -p prod --path "/Users/*" --threads --config patterns.yaml -o all_users.txt
+
+  # Parallel scan with custom thread count
+  %(prog)s -p prod --path "/Users/*" --threads 5 --config patterns.yaml -v -o scan.txt
+
+  # Parallel scan with short form
+  %(prog)s -p prod --path "/Shared/team*" -t 8 --config patterns.yaml -o teams.txt
         """
     )
     # Authentication arguments
@@ -972,6 +1189,19 @@ Examples:
         '-v',
         action='store_true',
         help='Enable verbose mode to track all scanned paths (directories, matched files, skipped files)'
+    )
+    parser.add_argument(
+        '--threads',
+        '-t',
+        type=int,
+        nargs='?',
+        const=10,
+        default=None,
+        metavar='N',
+        help='Enable parallel scanning with N threads (default: 10 if N not specified). '
+             'Use with wildcard paths to scan multiple directories concurrently. '
+             'Thread count automatically reduces if timeout errors exceed 30%%. '
+             'Examples: --threads (uses 10), --threads 5, -t 8'
     )
 
     # Language filtering
@@ -1059,13 +1289,25 @@ Examples:
                 print(f"  - {path}")
             print()
 
-            # Initialize scan with first path (resets lists)
-            print(f"Scanning Databricks workspace (wildcard pattern: {args.path})")
-            for i, path in enumerate(matching_paths):
-                if scanner.verbose:
-                    print(f"  Scanning path {i+1}/{len(matching_paths)}: {path}")
-                # First path resets, subsequent paths append
-                scanner.scan_workspace(start_path=path, reset_results=(i == 0))
+            # Determine if parallel scanning should be used
+            use_parallel = args.threads is not None
+            thread_count = args.threads if args.threads is not None else 10
+
+            if use_parallel and len(matching_paths) > 1:
+                # Parallel scan multiple paths
+                print(f"Using parallel scanning with {thread_count} threads")
+                scanner.scan_workspace_parallel(matching_paths, max_workers=thread_count)
+            else:
+                # Sequential scan
+                if use_parallel and len(matching_paths) == 1:
+                    print("Note: Only 1 path to scan, parallel mode not needed")
+
+                print(f"Scanning Databricks workspace (wildcard pattern: {args.path})")
+                for i, path in enumerate(matching_paths):
+                    if scanner.verbose:
+                        print(f"  Scanning path {i+1}/{len(matching_paths)}: {path}")
+                    # First path resets, subsequent paths append
+                    scanner.scan_workspace(start_path=path, reset_results=(i == 0))
 
             # Print summary after all paths scanned
             print(f"\nFound {len(scanner.source_files)} source code files")

@@ -272,6 +272,48 @@ python scan_databricks_workspace.py \
   --path /Users/developer.name
 ```
 
+### Using Parallel Scanning for Better Performance
+
+When scanning multiple paths (especially with wildcards), enable parallel scanning to process multiple directories concurrently:
+
+```bash
+# Parallel scan with default 10 threads
+python scan_databricks_workspace.py \
+  --profile production \
+  --path "/Users/*" \
+  --threads \
+  --config patterns_cwd_file_writes.yaml \
+  --output all_users_parallel.txt
+
+# Parallel scan with custom thread count
+python scan_databricks_workspace.py \
+  --profile production \
+  --path "/Users/*" \
+  --threads 5 \
+  --config patterns_cwd_file_writes.yaml \
+  --output scan_results.txt
+
+# Short form with -t flag
+python scan_databricks_workspace.py \
+  -p prod \
+  --path "/Shared/team*" \
+  -t 8 \
+  --config patterns_cwd_file_writes.yaml \
+  -o teams_scan.txt
+```
+
+**Adaptive Thread Reduction:**
+- The scanner automatically monitors timeout errors
+- If timeout rate exceeds 30%, thread count is halved automatically
+- Minimum thread count is 2 (won't go below this)
+- Monitor output for timeout warnings and adjust `--threads` if needed
+
+**Best Practices:**
+- Start with 10 threads (default) for most workspaces
+- Reduce to 5 or fewer if you see frequent timeout warnings
+- Use higher thread counts (15-20) for large workspaces with good API limits
+- Single path scans don't benefit from parallelism
+
 ## Tips
 
 1. **Start with a specific path** - Use `--path /Users/your.name` to scan a smaller area first
@@ -279,6 +321,8 @@ python scan_databricks_workspace.py \
 3. **Test patterns first** - Use `--pattern` to test individual patterns before adding to config
 4. **Review false positives** - Some patterns may match comments or strings; review results carefully
 5. **Combine with grep** - After scanning, use grep on the output file for further filtering
+6. **Use parallel scanning** - Enable `--threads` when scanning multiple paths to significantly speed up the process
+7. **Monitor timeouts** - Watch for timeout warnings; reduce thread count if they occur frequently
 
 ## Troubleshooting
 
