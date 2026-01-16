@@ -100,8 +100,8 @@ exceptions:
   # Exception 11: f-strings or format strings with variables (may become absolute)
   # MATCHES: f"{base_path}/file.csv", "{path}/output.csv".format(...)
   # Note: Only skip if there's a variable that might contain absolute path
-  - 'f["\'][^"\']*\\{[^}]+\\}[^"\']*/[^"\']*["\']'
-  - '["\'][^"\']*\\{[^}]+\\}[^"\']*/[^"\']*["\'].*\\.format\\s*\\('
+  - "f[\"'][^\"']*\\\\{[^}]+\\\\}[^\"']*/[^\"']*[\"']"
+  - "[\"'][^\"']*\\\\{[^}]+\\\\}[^\"']*/[^\"']*[\"'].*\\\\.format\\\\s*\\\\("
 
   # Exception 12: Already validated paths (common validation patterns)
   # MATCHES: if path.startswith('/') or path.is_absolute()

@@ -913,11 +913,25 @@ Examples:
 
     try:
         # Collect patterns from config file and/or CLI arguments
+        exceptions = []
         patterns = []
+
         if args.config:
-            patterns.extend(load_patterns_from_config(args.config))
+            loaded = load_patterns_from_config(args.config)
+            # Check if exceptions were returned (tuple) or just patterns (list)
+            if isinstance(loaded, tuple):
+                exceptions, patterns = loaded
+            else:
+                patterns = loaded
+
+        # Add CLI patterns if provided
         if args.pattern:
             patterns.extend(args.pattern)
+
+        # Combine exceptions and patterns into tuple if exceptions exist
+        if exceptions:
+            patterns = (exceptions, patterns)
+        # else patterns stays as a list
 
         # Process language filters
         languages = None
@@ -932,11 +946,14 @@ Examples:
         # If not specified, default to Python only (None will trigger default in constructor)
 
         # Initialize scanner
+        # Check if we have patterns (either list or tuple)
+        has_patterns = patterns and (isinstance(patterns, tuple) or len(patterns) > 0)
+
         scanner = DatabricksWorkspaceScanner(
             host=args.host,
             token=args.token,
             profile=args.profile,
-            patterns=patterns if patterns else None,
+            patterns=patterns if has_patterns else None,
             languages=languages,
             verbose=args.verbose
         )
@@ -948,7 +965,7 @@ Examples:
         scanner.print_results(group_by_type=args.group_by_type)
 
         # Print pattern matches if patterns were provided
-        if patterns:
+        if has_patterns:
             scanner.print_pattern_matches()
 
         # Export if requested
