@@ -33,7 +33,10 @@
 #   - Absolute paths (/tmp/...)
 #   - Comments and docstrings (code examples)
 #   - Test files with test data
+#   - Databricks magic commands (%run, %pip, %sh)
 #   - Already using proper storage paths
+#
+# TOTAL EXCEPTIONS: 15 patterns
 # ==========================================================================
 
 exceptions:
@@ -71,7 +74,8 @@ exceptions:
   # Exception 7: Code in docstrings (triple quotes)
   # This is trickier - match lines that look like docstring examples
   # MATCHES: """Example: df.to_csv("file.csv")"""
-  - '"""[^"]*(?:to_csv|to_parquet|save|write_text|write_bytes|open\\s*\\()[^"]*"""'
+  # Note: In single-quoted YAML, backslashes are literal, so \s means regex \s
+  - '"""[^"]*(?:to_csv|to_parquet|save|write_text|write_bytes|open\s*\()[^"]*"""'
   - "'''[^']*(?:to_csv|to_parquet|save|write_text|write_bytes|open\\s*\\()[^']*'''"
 
   # Exception 8: String literals in comparisons or assignments (not actual calls)
@@ -89,8 +93,9 @@ exceptions:
   # Exception 10: f-strings or format strings with variables (may become absolute)
   # MATCHES: f"{base_path}/file.csv", "{path}/output.csv".format(...)
   # Note: Only skip if there's a variable that might contain absolute path
-  - "f[\"'][^\"']*\\\\{[^}]+\\\\}[^\"']*/[^\"']*[\"']"
-  - "[\"'][^\"']*\\\\{[^}]+\\\\}[^\"']*/[^\"']*[\"'].*\\\\.format\\\\s*\\\\("
+  # Note: In double-quoted YAML, \\ becomes \ in Python regex
+  - "f[\"'][^\"']*\\{[^}]+\\}[^\"']*/[^\"']*[\"']"
+  - "[\"'][^\"']*\\{[^}]+\\}[^\"']*/[^\"']*[\"'].*\\.format\\s*\\("
 
   # Exception 11: Already validated paths (common validation patterns)
   # MATCHES: if path.startswith('/') or path.is_absolute()
@@ -101,6 +106,26 @@ exceptions:
   # Exception 12: Explicit /dev/null or /dev/stdout (Unix special files)
   # MATCHES: open("/dev/null", "w")
   - "/dev/(?:null|stdout|stderr)"
+
+  # Exception 13: Databricks magic %run commands with relative paths
+  # MATCHES: %run "./path/to/notebook", # MAGIC %run "./utils", MAGIC %run './helper'
+  # WHY: %run is for executing notebooks, not writing files
+  # These patterns catch various forms of Databricks magic commands
+  # Note: Must match the entire line context to skip it
+  - "#\\s*MAGIC\\s+%run"
+  - "^\\s*%run\\s+[\"']\\./[^\"']+[\"']"
+
+  # Exception 14: Databricks magic %pip install with local paths (development)
+  # MATCHES: %pip install -e "./package", # MAGIC %pip install "./local_package"
+  # WHY: pip install commands, not file writes
+  - "#\\s*MAGIC\\s+%pip"
+  - "^\\s*%pip"
+
+  # Exception 15: Databricks magic %sh commands with echo/cat (not file writes)
+  # MATCHES: %sh cat "./file.txt", # MAGIC %sh echo "./path"
+  # WHY: These are read operations or output, not writing files
+  - "#\\s*MAGIC\\s+%sh"
+  - "^\\s*%sh"
 
 
 patterns:
@@ -436,6 +461,27 @@ patterns:
 # TOTAL: 50+ patterns covering Python local file writes
 #
 # ============================================================================
+# EXCEPTION PATTERNS SUMMARY
+# ============================================================================
+# 1.  Unity Catalog Volumes (correct usage)
+# 2.  DBFS paths (deprecated but intentional)
+# 3.  System temp directory (/tmp/)
+# 4.  Databricks driver tmp directory
+# 5.  Cloud storage paths (S3, ADLS, GCS)
+# 6.  Code in comments
+# 7.  Code in docstrings
+# 8.  String literal assignments
+# 9.  Environment variables
+# 10. f-strings and format strings with variables
+# 11. Path validation patterns
+# 12. Unix special files (/dev/null, etc.)
+# 13. Databricks %run magic commands
+# 14. Databricks %pip install commands
+# 15. Databricks %sh read commands (cat, echo, etc.)
+#
+# TOTAL: 15 exception patterns to filter false positives
+#
+# ============================================================================
 # RISK LEVELS EXPLAINED
 # ============================================================================
 #
@@ -567,6 +613,36 @@ patterns:
 #   5. Files immediately uploaded to cloud storage
 #
 # Review each match to determine if it's a true issue.
+#
+# ============================================================================
+# DATABRICKS MAGIC COMMAND EXCEPTIONS (Why They're Excluded)
+# ============================================================================
+#
+# The following Databricks magic commands are excluded because they don't
+# write files to the current working directory:
+#
+# 1. %run "./path/to/notebook"
+#    - Executes another notebook (not a file write)
+#    - Commonly used for importing shared code/utilities
+#    - Example: %run "./utils/helper_functions"
+#
+# 2. %pip install -e "./package"
+#    - Installs a local Python package in development mode
+#    - Package installation operation (not file write to CWD)
+#    - Example: %pip install -e "./my_package"
+#
+# 3. %sh cat "./file.txt"
+#    - Shell commands that read files (not write)
+#    - Includes: cat, echo, ls, grep, head, tail, less, more
+#    - These are read operations or output display
+#
+# These patterns are typically found in notebooks and are legitimate
+# Databricks operations that happen to use relative path syntax.
+#
+# If you see these in your scan results despite the exceptions:
+#   - Check if the pattern is slightly different
+#   - Verify the exception regex is working correctly
+#   - Consider adding more specific exception patterns
 #
 # ============================================================================
 # ADDITIONAL RESOURCES
