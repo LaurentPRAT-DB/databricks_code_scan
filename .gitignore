@@ -40,8 +40,6 @@ security_patterns.yaml
 Thumbs.db
 
 # results output
-results*
-reports*
 logs*
 *.log
 *.csv
