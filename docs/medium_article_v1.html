@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<!--
+  Medium Article: How We Reduced Security Scan Noise by 80% in Databricks Workspaces
+  Version: 1.0.0
+  Last Updated: 2026-02-14
+  Features: Gist markers, mobile fallback links (/raw), reduced whitespace
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="version" content="1.0.0">
+    <meta name="last-updated" content="2026-02-14">
+    <title>How We Reduced Security Scan Noise by 80% in Databricks Workspaces</title>
+    <style>
+        body { font-family: Georgia, serif; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.6; }
+        h1, h2, h3 { font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+        img { max-width: 100%; height: auto; }
+        pre { background: #f5f5f5; padding: 15px; overflow-x: auto; border-radius: 5px; }
+        code { background: #f5f5f5; padding: 2px 6px; border-radius: 3px; }
+        blockquote { border-left: 4px solid #FF3621; margin-left: 0; padding-left: 20px; color: #333; }
+        .gist-marker {
+            background: #fff3cd;
+            border: 2px dashed #ffc107;
+            padding: 12px;
+            border-radius: 5px;
+            margin: 1em 0;
+            font-family: monospace;
+            font-size: 0.9em;
+        }
+        .mobile-fallback {
+            font-style: italic;
+            color: #666;
+            font-size: 0.9em;
+            margin-top: 0.5em;
+        }
+        hr { border: none; border-top: 1px solid #ddd; margin: 2em 0; }
+        table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+        th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }
+        th { background: #f5f5f5; }
+    </style>
+</head>
+<body>
+
+<h1>How We Reduced Security Scan Noise by 80% in Databricks Workspaces</h1>
+
+<p><em>A Python tool that makes workspace security audits actually usable</em></p>
+
+<hr>
+
+<h2>The Security Scan Problem Nobody Talks About</h2>
+
+<p>Last month, I ran a security scan on a production Databricks workspace. The result? <strong>2,847 alerts</strong>. My heart sank.</p>
+
+<p>After spending 3 hours manually reviewing results, I discovered something frustrating: <strong>over 90% were false positives</strong>. Comments containing code examples. Test files with mock data. Read operations flagged as writes. Paths using Unity Catalog Volumes (the <em>correct</em> approach) getting flagged alongside actual issues.</p>
+
+<p>Sound familiar?</p>
+
+<p>This is the dirty secret of security scanning: most tools generate so much noise that teams either ignore the results entirely or spend more time filtering false positives than fixing real issues. Alert fatigue is real, and it's dangerous.</p>
+
+<img src="https://raw.githubusercontent.com/LaurentPRAT-DB/databricks_code_scan/main/docs/images/problem_solution.png" alt="Problem to Solution: Exception Pattern System">
+<p><em>The Exception Pattern System transforms noisy security scans into actionable results.</em></p>
+
+<p>I built a tool that solves this. It's called the <strong>Databricks Workspace Security Scanner</strong>, and its secret weapon is an <strong>exception pattern system</strong> that reduces false positives by 60-80%.</p>
+
+<hr>
+
+<h2>What You'll Learn</h2>
+
+<p><strong>For Security Teams</strong> — 5 min read<br>
+Why traditional regex scanning fails and how exception patterns fix it</p>
+
+<p><strong>For Platform Engineers</strong> — 10 min read<br>
+How to deploy and configure the scanner for your organization</p>
+
+<p><strong>For Developers</strong> — 15 min read<br>
+The technical architecture and how to customize patterns for your needs</p>
+
+<hr>
+
+<h2>For Security Teams: The 2-Minute Summary</h2>
+
+<p>Traditional security scanners use simple regex patterns to find issues. The problem? They match <em>everything</em> that looks suspicious, including perfectly safe code.</p>
+
+<p><strong>Without Exception Patterns:</strong></p>
+<ul>
+<li>Security scan generates 2,847 alerts</li>
+<li>90% are false positives (comments, tests, safe paths)</li>
+<li>Team spends 10+ hours triaging</li>
+<li>Alert fatigue sets in</li>
+<li>Real issues get missed</li>
+</ul>
+
+<p><strong>With Exception Patterns:</strong></p>
+<ul>
+<li>Same scan generates 284 alerts</li>
+<li>80% are real issues requiring action</li>
+<li>Team triages in 1-2 hours</li>
+<li>Focus on actual security problems</li>
+<li>Better coverage, less noise</li>
+</ul>
+
+<p>The key insight: <strong>check what to skip <em>before</em> checking what to flag</strong>.</p>
+
+<img src="https://raw.githubusercontent.com/LaurentPRAT-DB/databricks_code_scan/main/docs/images/exception_flow.png" alt="Exception Pattern Flow">
+<p><em>Every line is checked against 17 exception categories first. Only lines that don't match any exception are flagged.</em></p>
+
+<blockquote>
+<strong>Security Team Action Item:</strong> Request a pilot scan of one workspace using this tool. Compare alert quality vs. your current scanner.
+</blockquote>
+
+<hr>
+
+<h2>For Platform Engineers: 15-Minute Installation</h2>
+
+<h3>Prerequisites</h3>
+<ul>
+<li>Python 3.8+</li>
+<li>Databricks workspace access (personal access token or CLI profile)</li>
+<li>Network access to Databricks APIs</li>
+</ul>
+
+<h3>One-Command Installation with uv (Recommended)</h3>
+
+<p>The scanner uses <strong>uv</strong> for dependency management. No virtual environment setup needed.</p>
+
+<p class="gist-marker">GIST #1<br>https://gist.github.com/LaurentPRAT-DB/1a1e4ae8c08a6cea9d162c5c80562505</p>
+<script src="https://gist.github.com/LaurentPRAT-DB/1a1e4ae8c08a6cea9d162c5c80562505.js"></script>
+<p class="mobile-fallback">📱 On mobile? <a href="https://gist.github.com/LaurentPRAT-DB/1a1e4ae8c08a6cea9d162c5c80562505/raw">View raw code</a></p>
+
+<h3>Configure Authentication</h3>
+
+<p>The scanner supports multiple authentication methods:</p>
+
+<p class="gist-marker">GIST #2<br>https://gist.github.com/LaurentPRAT-DB/36148d6f272973e01c0db332eb11af66</p>
+<script src="https://gist.github.com/LaurentPRAT-DB/36148d6f272973e01c0db332eb11af66.js"></script>
+<p class="mobile-fallback">📱 On mobile? <a href="https://gist.github.com/LaurentPRAT-DB/36148d6f272973e01c0db332eb11af66/raw">View raw code</a></p>
+
+<h3>Run Your First Security Scan</h3>
+
+<p class="gist-marker">GIST #3<br>https://gist.github.com/LaurentPRAT-DB/af8e92d88b921fdd2e0c315f789f3a6c</p>
+<script src="https://gist.github.com/LaurentPRAT-DB/af8e92d88b921fdd2e0c315f789f3a6c.js"></script>
+<p class="mobile-fallback">📱 On mobile? <a href="https://gist.github.com/LaurentPRAT-DB/af8e92d88b921fdd2e0c315f789f3a6c/raw">View raw code</a></p>
+
+<p><strong>Sample Output:</strong></p>
+
+<pre><code>Connected to workspace as: admin@company.com
+Workspace URL: https://production.cloud.databricks.com
+Loaded 17 exception pattern(s) from config
+Loaded 50 pattern(s) from config
+
+Compiling 17 exception pattern(s)...
+  ✓ Exception: /Volumes/[^"'\s]+...
+  ✓ Exception: s3a?://[^"'\s]+...
+
+Scanning Databricks workspace starting from: /
+Found 1,247 source code files
+Found 156 pattern match(es)
+
+Pattern Matches (156 total):
+================================================================================
+/Users/john.doe/ETL_Pipeline (3 matches):
+  Line 45: df.to_csv("output.csv")
+  Line 89: model.save("trained_model.h5")
+</code></pre>
+
+<blockquote>
+<strong>Platform Engineer Action Item:</strong> Set up the scanner in your CI/CD pipeline to run weekly scans with results sent to your security team.
+</blockquote>
+
+<hr>
+
+<h2>For Developers: The Technical Deep Dive</h2>
+
+<h3>Architecture Overview</h3>
+
+<img src="https://raw.githubusercontent.com/LaurentPRAT-DB/databricks_code_scan/main/docs/images/architecture.png" alt="Scanner Architecture">
+<p><em>The two-tier matching system: exceptions are checked FIRST, then patterns are applied only to non-exception lines.</em></p>
+
+<p>The scanner follows a clear data flow:</p>
+<ol>
+<li><strong>Authentication</strong>: Connect to Databricks using SDK with multiple auth options</li>
+<li><strong>Directory Traversal</strong>: Recursively scan workspace starting from specified path</li>
+<li><strong>Language Filtering</strong>: Only process files matching target languages (default: Python)</li>
+<li><strong>Content Download</strong>: Fetch file content via Databricks API</li>
+<li><strong>Exception Checking</strong>: For each line, check 17 exception patterns FIRST</li>
+<li><strong>Pattern Matching</strong>: Apply detection patterns only to non-exception lines</li>
+<li><strong>Reporting</strong>: Generate grouped results with line numbers and context</li>
+</ol>
+
+<h3>The Exception Pattern System</h3>
+
+<p>This is where the magic happens. Instead of post-filtering results, we <strong>skip lines before flagging</strong> them.</p>
+
+<p class="gist-marker">GIST #4<br>https://gist.github.com/LaurentPRAT-DB/940abe3efdbc64f1dfe6614553fb09ca</p>
+<script src="https://gist.github.com/LaurentPRAT-DB/940abe3efdbc64f1dfe6614553fb09ca.js"></script>
+<p class="mobile-fallback">📱 On mobile? <a href="https://gist.github.com/LaurentPRAT-DB/940abe3efdbc64f1dfe6614553fb09ca/raw">View raw code</a></p>
+
+<h3>Built-in Exception Categories (17 Total)</h3>
+
+<p><strong>Unity Catalog Volumes</strong> (<code>/Volumes/cat/schema/vol/</code>) — Recommended storage</p>
+<p><strong>Cloud Storage</strong> (<code>s3://</code>, <code>abfss://</code>, <code>gs://</code>) — Direct cloud access</p>
+<p><strong>System Temp</strong> (<code>/tmp/processing.csv</code>) — Legitimate temp files</p>
+<p><strong>Comments</strong> (<code># df.to_csv("file.csv")</code>) — Documentation</p>
+<p><strong>Docstrings</strong> (<code>"""Example: model.save()"""</code>) — Code examples</p>
+<p><strong>Variable Assignments</strong> (<code>filename = "output.csv"</code>) — String literal, not operation</p>
+<p><strong>f-strings with Variables</strong> (<code>f"{base_path}/file.csv"</code>) — May be absolute at runtime</p>
+<p><strong>Read Operations</strong> (<code>pd.read_csv('./data.csv')</code>) — Not writes</p>
+<p><strong>Test Paths</strong> (<code>/tests/test_file.py</code>) — Test data and mocks</p>
+
+<h3>Example: What Gets Skipped vs. Detected</h3>
+
+<p class="gist-marker">GIST #5<br>https://gist.github.com/LaurentPRAT-DB/0edc373207b121b66a97430eebb2a2a4</p>
+<script src="https://gist.github.com/LaurentPRAT-DB/0edc373207b121b66a97430eebb2a2a4.js"></script>
+<p class="mobile-fallback">📱 On mobile? <a href="https://gist.github.com/LaurentPRAT-DB/0edc373207b121b66a97430eebb2a2a4/raw">View raw code</a></p>
+
+<h3>Adding Custom Exceptions</h3>
+
+<p>Your organization probably has approved storage locations or wrapper functions. Add them to the config:</p>
+
+<p class="gist-marker">GIST #6<br>https://gist.github.com/LaurentPRAT-DB/dd60fae7fe0ea87fd2acfaea045e444f</p>
+<script src="https://gist.github.com/LaurentPRAT-DB/dd60fae7fe0ea87fd2acfaea045e444f.js"></script>
+<p class="mobile-fallback">📱 On mobile? <a href="https://gist.github.com/LaurentPRAT-DB/dd60fae7fe0ea87fd2acfaea045e444f/raw">View raw code</a></p>
+
+<h3>Performance Considerations</h3>
+
+<p><strong>Small workspaces</strong> (&lt;1K files): 5-10 seconds without patterns, 30-60 seconds with patterns</p>
+<p><strong>Medium workspaces</strong> (1K-10K): 30-60 seconds without patterns, 5-15 minutes with patterns</p>
+<p><strong>Large workspaces</strong> (&gt;10K files): 2-5 minutes without patterns, 15-60 minutes with patterns</p>
+
+<p><strong>Optimization Tips:</strong></p>
+<ul>
+<li>Use <code>--language python</code> to filter files (default)</li>
+<li>Use <code>--path /Users/specific.team</code> to limit scope</li>
+<li>Enable <code>--threads 10</code> for parallel scanning</li>
+<li>Run scans during off-peak hours</li>
+</ul>
+
+<hr>
+
+<h2>Try It Yourself: 3 Paths</h2>
+
+<h3>Path 1: Quick Test (5 minutes)</h3>
+
+<pre><code># Clone and run immediately
+git clone https://github.com/LaurentPRAT-DB/databricks_code_scan.git
+cd databricks_code_scan
+uv run scan_databricks_workspace.py --profile YOUR_PROFILE --path /Users/YOUR_EMAIL
+</code></pre>
+
+<h3>Path 2: Full Security Audit (15 minutes)</h3>
+
+<pre><code># Complete workspace scan with exception filtering
+uv run scan_databricks_workspace.py \
+  --profile production \
+  --language python \
+  --language sql \
+  --config patterns_python_local_writes.yaml \
+  --verbose \
+  --output full_audit_$(date +%Y%m%d).txt
+</code></pre>
+
+<h3>Path 3: CI/CD Integration</h3>
+
+<p>Add to your pipeline to run weekly scans:</p>
+
+<p class="gist-marker">GIST #7<br>https://gist.github.com/LaurentPRAT-DB/3420ac7b54b40a2499d131a620ac33ed</p>
+<script src="https://gist.github.com/LaurentPRAT-DB/3420ac7b54b40a2499d131a620ac33ed.js"></script>
+<p class="mobile-fallback">📱 On mobile? <a href="https://gist.github.com/LaurentPRAT-DB/3420ac7b54b40a2499d131a620ac33ed/raw">View raw code</a></p>
+
+<hr>
+
+<h2>Common Gotchas</h2>
+
+<h3>Gotcha 1: "Path doesn't exist" with wildcards</h3>
+
+<p><strong>Cause:</strong> Shell expansion happens locally before the script runs.</p>
+
+<p><strong>Solution:</strong> Always quote wildcard paths:</p>
+
+<pre><code># ❌ Wrong - shell expands against local filesystem
+uv run scan_databricks_workspace.py --path /Users/laurent*
+
+# ✅ Correct - quotes prevent shell expansion
+uv run scan_databricks_workspace.py --path "/Users/laurent*"
+</code></pre>
+
+<h3>Gotcha 2: Too many timeouts during parallel scans</h3>
+
+<p><strong>Cause:</strong> API rate limiting with too many concurrent requests.</p>
+
+<p><strong>Solution:</strong> Reduce thread count:</p>
+
+<pre><code># Start with default (10 threads), reduce if timeouts occur
+uv run scan_databricks_workspace.py --threads 5 ...
+</code></pre>
+
+<h3>Gotcha 3: Pattern not matching expected code</h3>
+
+<p><strong>Cause:</strong> Regex escaping issues in YAML.</p>
+
+<p><strong>Solution:</strong> Test patterns separately:</p>
+
+<pre><code>import re
+pattern = r'\.to_csv\s*\(\s*["\''][^/][^"\']*["\']'
+test_line = 'df.to_csv("output.csv")'
+print(re.search(pattern, test_line))  # Should match
+</code></pre>
+
+<hr>
+
+<h2>Use Cases Beyond Security</h2>
+
+<p>The scanner isn't just for security audits:</p>
+
+<p><strong>Unity Catalog Migration:</strong> Find all code using deprecated DBFS paths</p>
+
+<p><strong>Code Quality Reviews:</strong> Find TODO/FIXME comments across the workspace</p>
+
+<p><strong>Compliance Audits:</strong> Custom patterns for organizational policies</p>
+
+<hr>
+
+<h2>Resources</h2>
+
+<ul>
+<li><strong>GitHub Repository:</strong> <a href="https://github.com/LaurentPRAT-DB/databricks_code_scan">github.com/LaurentPRAT-DB/databricks_code_scan</a></li>
+<li><strong>Exception Patterns Guide:</strong> <a href="https://github.com/LaurentPRAT-DB/databricks_code_scan/blob/main/EXCEPTION_PATTERNS_GUIDE.md">EXCEPTION_PATTERNS_GUIDE.md</a></li>
+<li><strong>Pattern Usage Guide:</strong> <a href="https://github.com/LaurentPRAT-DB/databricks_code_scan/blob/main/PATTERNS_USAGE.md">PATTERNS_USAGE.md</a></li>
+<li><strong>Databricks Unity Catalog Volumes:</strong> <a href="https://docs.databricks.com/en/connect/unity-catalog/volumes.html">Databricks Documentation</a></li>
+</ul>
+
+<hr>
+
+<h2>About the Author</h2>
+
+<p><em>Laurent Prat is a Solutions Architect at Databricks, helping customers build secure, scalable data platforms. When not hunting for hardcoded credentials in notebooks, he's probably automating something that shouldn't be automated.</em></p>
+
+<hr>
+
+<p><strong>Did this help?</strong> Give it a clap and follow for more Databricks security and automation content.</p>
+
+<p><em>Tags: #Databricks #Security #Python #DataEngineering #DevSecOps</em></p>
+
+</body>
+</html>
